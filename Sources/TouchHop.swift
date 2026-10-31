@@ -275,6 +275,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var shortcutStatus: NSTextField!
     var savedShortcut = KeyboardShortcut.defaultReturn
     var isShortcutEnabled = true
+    let cursorBeacon = CursorBeacon()
+    var lastShortcutRetry: TimeInterval = 0
 
     func label(_ text: String, size: CGFloat = 14, bold: Bool = false) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: text)
@@ -334,17 +336,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dataLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(statusLabel)
         stack.addArrangedSubview(dataLabel)
-        stack.addArrangedSubview(label("返回当前主屏", bold: true))
-        shortcutEnabled = NSButton(checkboxWithTitle: "启用返回主屏快捷键", target: self,
+        stack.addArrangedSubview(label("快捷键切换屏幕", bold: true))
+        shortcutEnabled = NSButton(checkboxWithTitle: "启用切屏快捷键", target: self,
                                    action: #selector(toggleReturnShortcut))
         stack.addArrangedSubview(shortcutEnabled)
         shortcutRecorder = ShortcutRecorderButton()
         shortcutRecorder.bezelStyle = .rounded
         let shortcutRow = NSStackView(views: [shortcutRecorder,
-            button("恢复默认", action: #selector(resetReturnShortcut))])
+            button("恢复默认", action: #selector(resetReturnShortcut)),
+            button("预览指针放大", action: #selector(previewCursorBeacon))])
         shortcutRow.spacing = 12
         stack.addArrangedSubview(shortcutRow)
-        let shortcutHint = label("点击组合键可重新录入。需包含 Control 或 Command；Esc 取消。鼠标返回当前主屏中央，已在主屏时保持原位。", size: 12)
+        let shortcutHint = label("可录入单键或组合键；Esc 取消。单独按下并松开右 Command 可来回切屏，并短暂放大指针。字母单键会占用该键的普通输入。", size: 12)
         shortcutHint.textColor = .secondaryLabelColor
         stack.addArrangedSubview(shortcutHint)
         shortcutStatus = label("", size: 12)
@@ -374,21 +377,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     func configureReturnShortcut() {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: "returnToMainShortcut"),
-           let decoded = try? JSONDecoder().decode(KeyboardShortcut.self, from: data) { savedShortcut = decoded }
+        let decoded = defaults.data(forKey: "returnToMainShortcut").flatMap {
+            try? JSONDecoder().decode(KeyboardShortcut.self, from: $0)
+        }
+        savedShortcut = migratedShortcut(decoded, schema: defaults.integer(forKey: "shortcutSchemaVersion"))
+        defaults.set(try? JSONEncoder().encode(savedShortcut), forKey: "returnToMainShortcut")
+        defaults.set(3, forKey: "shortcutSchemaVersion")
         isShortcutEnabled = defaults.object(forKey: "returnToMainShortcutEnabled") as? Bool ?? true
         shortcutEnabled.state = isShortcutEnabled ? .on : .off
         shortcutRecorder.shortcut = savedShortcut
-        returnShortcut.onPress = { [weak self] in self?.returnToMainScreen() }
+        returnShortcut.onPress = { [weak self] in self?.cycleScreen() }
         shortcutRecorder.onBegin = { [weak self] in
             self?.returnShortcut.pause()
-            self?.shortcutStatus.stringValue = "请按下新的组合键；按 Esc 保留原来的快捷键"
+            self?.shortcutStatus.stringValue = "请按单键或组合键；单独修饰键松开后确认，Esc 取消"
         }
         shortcutRecorder.onCancel = { [weak self] in self?.resumeReturnShortcut() }
         shortcutRecorder.onCapture = { [weak self] candidate in
             guard let self else { return false }
             guard let candidate else {
-                self.shortcutStatus.stringValue = "组合键需包含 Control 或 Command，并加上一个其他按键"
+                self.shortcutStatus.stringValue = "此按键暂不支持，请使用普通按键或左右 Command、Control、Option、Shift、Fn"
                 return false
             }
             do {
@@ -406,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resumeReturnShortcut()
     }
     func resumeReturnShortcut() {
-        guard isShortcutEnabled else { shortcutStatus.stringValue = "返回主屏快捷键已停用"; return }
+        guard isShortcutEnabled else { shortcutStatus.stringValue = "切屏快捷键已停用"; return }
         do {
             try returnShortcut.register(savedShortcut)
             shortcutStatus.stringValue = "快捷键已启用：\(savedShortcut.title)"
@@ -431,17 +438,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resumeReturnShortcut()
         } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法恢复默认快捷键" }
     }
-    func returnToMainScreen() {
+    @objc func previewCursorBeacon() {
+        if let point = CGEvent(source: nil)?.location { cursorBeacon.show(at: point) }
+    }
+    func cycleScreen() {
         guard AXIsProcessTrusted() else { shortcutStatus.stringValue = "请先允许鼠标控制权限"; return }
-        let display = CGMainDisplayID() // Resolve the current system main display on every press.
-        guard CGDisplayIsActive(display) != 0, let cursor = CGEvent(source: nil)?.location else { return }
-        guard let destination = primaryReturnPoint(cursor: cursor, bounds: CGDisplayBounds(display)) else {
-            shortcutStatus.stringValue = "鼠标已在当前主屏"; return
-        }
+        guard let cursor = CGEvent(source: nil)?.location,
+              let target = nextScreenDestination(cursor: cursor, screens: activeCycleScreens()) else { return }
+        let destination = target.center
         if CGEventSource.buttonState(.combinedSessionState, button: .right) ||
            CGEventSource.buttonState(.combinedSessionState, button: .center) ||
            (!mapper.isDown && CGEventSource.buttonState(.combinedSessionState, button: .left)) {
-            shortcutStatus.stringValue = "请先松开鼠标按键，再返回主屏"; return
+            shortcutStatus.stringValue = "请先松开鼠标按键，再切换屏幕"; return
         }
         mapper.suspendTouchForCursorReturn()
         guard CGWarpMouseCursorPosition(destination) == .success else {
@@ -449,7 +457,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: destination,
                 mouseButton: .left)?.post(tap: .cghidEventTap)
-        shortcutStatus.stringValue = "已返回当前主屏：\(displayName(display))"
+        cursorBeacon.show(at: destination)
+        shortcutStatus.stringValue = "已切换到屏幕中央：\(displayName(target.id))"
     }
     func refreshDisplays() {
         let saved = UserDefaults.standard.string(forKey: "displayUUID")
@@ -514,6 +523,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let monitoring = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
         permissionLabel.stringValue = "鼠标控制：\(control ? "已允许" : "待允许")    输入监控：\(monitoring ? "已允许" : "待允许")"
         if mapper.running && (!control || !monitoring) { mapper.stop() }
+        if savedShortcut.isSingle && (!control || !monitoring) && returnShortcut.isRegistered {
+            returnShortcut.pause()
+            shortcutStatus.stringValue = "单键快捷键等待鼠标控制和输入监控权限"
+        }
+        if control && monitoring && isShortcutEnabled && !shortcutRecorder.recording && !returnShortcut.isRegistered {
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastShortcutRetry > 2 { lastShortcutRetry = now; resumeReturnShortcut() }
+        }
         if autoStartPending && control && monitoring && selectedUUID != nil {
             autoStartPending = false
             enable()
@@ -525,7 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow(); return false
     }
-    func applicationWillTerminate(_ notification: Notification) { returnShortcut.pause(); mapper.stop() }
+    func applicationWillTerminate(_ notification: Notification) { cursorBeacon.stop(); returnShortcut.pause(); mapper.stop() }
 }
 
 func selfTest() {
@@ -554,23 +571,74 @@ func selfTest() {
     let up = decodeMouseReport([7,0,0,0,0,0,0],reportID:7,maxX:maxX,maxY:maxY)!
     require(!up.down, "liftoff decoded")
     let hotkey = KeyboardShortcut.defaultReturn
-    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(controlKey | optionKey)) == hotkey, "default shortcut")
-    require(KeyboardShortcut(keyCode: 4, modifiers: 0) == nil, "ordinary typing cannot be registered")
-    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(shiftKey | optionKey)) == nil, "modifier requirement")
-    require(KeyboardShortcut(keyCode: 55, modifiers: UInt32(cmdKey)) == nil, "modifier-only key rejected")
+    require(KeyboardShortcut(keyCode: 54, modifiers: 0) == hotkey, "right Command default")
+    require(KeyboardShortcut(keyCode: 4, modifiers: 0) != nil, "single ordinary key allowed")
+    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(shiftKey | optionKey)) != nil, "optional combination modifiers")
+    require(KeyboardShortcut(keyCode: 55, modifiers: UInt32(cmdKey)) == nil, "modifier key must be standalone")
     require(KeyboardShortcut(keyCode: 53, modifiers: UInt32(cmdKey)) == nil, "Escape remains recorder cancel")
     require(KeyboardShortcut(keyCode: 127, modifiers: UInt32(controlKey)) == nil, "invalid key code rejected")
     require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(controlKey) | (1 << 30)) == nil, "unknown modifiers rejected")
     let shortcutData = try! JSONEncoder().encode(hotkey)
     require((try? JSONDecoder().decode(KeyboardShortcut.self, from: shortcutData)) == hotkey, "shortcut settings round-trip")
-    require((try? JSONDecoder().decode(KeyboardShortcut.self, from: Data("{\"keyCode\":4,\"modifiers\":0}".utf8))) == nil,
+    require((try? JSONDecoder().decode(KeyboardShortcut.self, from: Data("{\"keyCode\":54,\"modifiers\":256}".utf8))) == nil,
             "invalid persisted shortcut rejected")
+    require(hotkey.title.contains("右 Command"), "side-specific shortcut label")
+    require(KeyboardShortcut(keyCode: 55, modifiers: 0) != hotkey, "left and right Command differ")
+    require(KeyboardShortcut(keyCode: 57, modifiers: 0) == nil, "latching Caps Lock not treated as a tap")
+    require(KeyboardShortcut(keyCode: 63, modifiers: 0) != nil, "Fn key allowed")
+    require(migratedShortcut(.legacyDefault, schema: 0) == hotkey, "old default migrates to right Command")
+    require(migratedShortcut(.legacyDefault, schema: 3) == .legacyDefault, "explicit legacy combination preserved after migration")
+    let custom = KeyboardShortcut(keyCode: 38, modifiers: 0)!
+    require(migratedShortcut(custom, schema: 0) == custom, "custom shortcut preserved")
+    require(migratedShortcut(nil, schema: 0) == hotkey, "fresh settings default")
     let primary = CGRect(x: 0, y: 0, width: 1470, height: 956)
-    require(primaryReturnPoint(cursor: CGPoint(x: -500, y: 200), bounds: primary) == CGPoint(x: 735, y: 478), "return from external screen")
-    require(primaryReturnPoint(cursor: CGPoint(x: 22, y: 33), bounds: primary) == nil, "already on main screen stays put")
-    require(primaryReturnPoint(cursor: CGPoint(x: 2000, y: 300), bounds: CGRect(x: -1000, y: -500, width: 800, height: 600)) == CGPoint(x: -600, y: -200), "return respects supplied main display geometry")
-    require(primaryReturnPoint(cursor: .zero, bounds: .null) == nil, "missing main screen ignored")
-    require(primaryReturnPoint(cursor: CGPoint(x: CGFloat.nan, y: 0), bounds: primary) == nil, "invalid cursor ignored")
+    let mainScreen = ScreenDestination(id: 1, bounds: primary)
+    let external = ScreenDestination(id: 2, bounds: b)
+    let third = ScreenDestination(id: 3, bounds: CGRect(x: 1470, y: 0, width: 1600, height: 900))
+    require(nextScreenDestination(cursor: external.center, screens: [mainScreen, external]) == mainScreen, "external to main")
+    require(nextScreenDestination(cursor: mainScreen.center, screens: [mainScreen, external]) == external, "main back to external")
+    require(nextScreenDestination(cursor: external.center, screens: [mainScreen, external, third]) == third, "three-screen forward cycle")
+    require(nextScreenDestination(cursor: third.center, screens: [mainScreen, external, third]) == mainScreen, "screen cycle wraps")
+    require(nextScreenDestination(cursor: CGPoint(x: 9000, y: 9000), screens: [mainScreen, external]) == mainScreen, "off-desktop cursor recovers to main")
+    require(nextScreenDestination(cursor: .zero, screens: []) == nil, "no screens ignored")
+    require(nextScreenDestination(cursor: CGPoint(x: CGFloat.nan, y: 0), screens: [mainScreen]) == nil, "invalid cursor ignored")
+    require(nextScreenDestination(cursor: .zero, screens: [ScreenDestination(id: 9, bounds: .null)]) == nil, "invalid screen ignored")
+    require(nextScreenDestination(cursor: .zero, screens: [mainScreen])?.center == CGPoint(x: 735, y: 478), "single-screen centering")
+    require(cursorBeaconOrigin(cursor: CGPoint(x: -1024, y: 285), mainHeight: 956, panelSize: 180) == CGPoint(x: -1114, y: 581), "beacon external coordinates")
+    require(cursorBeaconOrigin(cursor: mainScreen.center, mainHeight: 956, panelSize: 180) == CGPoint(x: 645, y: 388), "beacon main coordinates")
+
+    let rightDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x10)
+    let leftDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x08)
+    let bothDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x18)
+    var tap = ModifierTapRecognizer(keyCode: 54)
+    require(!tap.flagsChanged(key: 54, flags: rightDown), "modifier press waits for release")
+    require(tap.flagsChanged(key: 54, flags: []), "standalone right Command release fires")
+    require(!tap.flagsChanged(key: 54, flags: []), "duplicate release does not fire")
+    require(!tap.flagsChanged(key: 55, flags: leftDown), "left Command does not arm right Command")
+    require(!tap.flagsChanged(key: 55, flags: []), "left Command release ignored")
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    tap.cancel() // A normal key-down (e.g. Command+C) or a mouse gesture cancels the standalone tap.
+    require(!tap.flagsChanged(key: 54, flags: []), "Command combination does not switch screens")
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    tap.cancel()
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    require(!tap.flagsChanged(key: 54, flags: []), "duplicate flags cannot rearm a canceled combination")
+    _ = tap.flagsChanged(key: 54, flags: bothDown)
+    _ = tap.flagsChanged(key: 55, flags: rightDown)
+    require(!tap.flagsChanged(key: 54, flags: []), "both Command keys are not a solo tap")
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    _ = tap.flagsChanged(key: 56, flags: CGEventFlags(rawValue: rightDown.rawValue | CGEventFlags.maskShift.rawValue | 0x02))
+    _ = tap.flagsChanged(key: 56, flags: rightDown)
+    require(!tap.flagsChanged(key: 54, flags: []), "another modifier cancels solo tap")
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    require(!tap.flagsChanged(key: 54, flags: rightDown), "held modifier does not repeat")
+    require(tap.flagsChanged(key: 54, flags: []), "new solo tap still works after cancellation")
+    var controlTap = ModifierTapRecognizer(keyCode: 62)
+    _ = controlTap.flagsChanged(key: 62, flags: CGEventFlags(rawValue: CGEventFlags.maskControl.rawValue | 0x2000))
+    require(controlTap.flagsChanged(key: 62, flags: []), "right Control single key")
+    var fnTap = ModifierTapRecognizer(keyCode: 63)
+    _ = fnTap.flagsChanged(key: 63, flags: .maskSecondaryFn)
+    require(fnTap.flagsChanged(key: 63, flags: []), "Fn single key")
     print("PASS: \(checks) packet, coordinate and shortcut checks; no device opened and no input posted")
 }
 

@@ -28,7 +28,8 @@ The app reads the device's declared coordinate limits instead of assuming the te
 - Direct touch-to-cursor positioning across displays.
 - Single-finger press/release and dragging, with mouse click-count handling for double-clicks.
 - Optional 90°, 180°, and 270° coordinate rotation.
-- A configurable global shortcut to return the cursor to the current main display.
+- Configurable single-key or combination shortcuts, defaulting to the right Command key.
+- Repeated presses cycle between screen centers, with a temporary enlarged pointer locator.
 - Saved target display, rotation, and enabled state.
 - Exclusive access to the matching touch mouse interfaces, preventing macOS from also mapping the same input to the wrong display.
 - A visible settings window with permission status, interface count, and input activity.
@@ -79,19 +80,23 @@ For login startup, add TouchHop in **System Settings → General → Login Items
 
 TouchHop uses a new app identity relative to the earlier local prototype named 外屏触控定位. Its permissions and preferences are separate. Quit the prototype before enabling TouchHop; this repository does not replace or modify an existing installation.
 
-### Return to the main display
+### Cycle between screens
 
-The default shortcut is **Control + Option + H** (`⌃⌥H`). It moves the pointer to the center of the system's current main display. If the pointer is already on that display, it stays where it is. TouchHop resolves the main display on each press, so changing the primary display in System Settings is respected.
+The default shortcut is **right Command**, pressed and released on its own. With two displays, each tap moves the cursor to the other screen's center; another tap brings it back. With more displays, TouchHop cycles through the active displays in main-display-first order. Display geometry is resolved on each press.
 
-In the **返回当前主屏** section:
+In the **快捷键切换屏幕** section:
 
-- Click the displayed combination and press your preferred shortcut, including Control or Command plus another key. Press Escape to cancel recording.
-- **恢复默认** restores `⌃⌥H`; **启用返回主屏快捷键** enables or disables this feature independently of touch mapping.
-- The combination and enabled state are saved across app restarts. A rejected/conflicting replacement does not overwrite the previous saved shortcut.
+- Click the displayed key to record a single ordinary key, a left/right modifier key, or a combination. Release a standalone modifier to finish recording it; Escape cancels. Caps Lock and Escape are not assignable.
+- **恢复默认** restores right Command; **启用切屏快捷键** enables or disables this feature independently of touch mapping.
+- Right and left Command are distinct single keys. A modifier triggers only after a solo press/release. Using it with another key, a click, drag, or scroll cancels the screen switch, so ordinary Command combinations keep their normal behavior.
+- An ordinary single key is consumed as a shortcut while enabled; assigning a letter or Space replaces its unmodified typing behavior. Modified uses of that key remain available.
+- The shortcut and enabled state persist across restarts. On the first upgrade from 0.2, the former default `⌃⌥H` migrates to right Command. Other custom bindings are retained.
 
-The shortcut is available while other apps are in front, and does not click or focus a window. Release a physical mouse drag before using it. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
+Each switch shows a roughly one-second enlarged pointer with a locator ring. This is a click-through overlay that follows the cursor and fades automatically; it does not permanently change macOS pointer-size preferences. **预览指针放大** previews this effect without moving the cursor.
 
-Global shortcuts use Carbon's registered-hotkey API. Only the configured combination is delivered; TouchHop does not install a global keyboard-event monitor. Shortcut recording listens locally while its settings recorder is active.
+The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
+
+Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. It runs only while that shortcut is enabled, requires mouse-control and Input Monitoring access, and does not store key history or typed text. Recording listens locally in the settings window.
 
 ## How it works
 
@@ -101,7 +106,7 @@ If the selected display is unavailable, touch is not redirected to the built-in 
 
 ## Validation
 
-`./scripts/test.sh` runs 25 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence, and main-display return geometry. These checks do not open a HID device, register a global shortcut, request permissions, or post input.
+`./scripts/test.sh` runs 52 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, and pointer-overlay geometry. These checks do not open a HID device, install a keyboard event tap, register a global shortcut, request permissions, or post input.
 
 The GitHub Actions workflow builds the app, runs these checks, and uploads a development ZIP. CI does not test physical touch hardware, permissions, or actual login startup.
 

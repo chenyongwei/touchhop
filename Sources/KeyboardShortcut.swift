@@ -2,21 +2,73 @@
 
 import AppKit
 import Carbon
+import CoreGraphics
+import IOKit.hid
+import ApplicationServices
+
+// Device-specific modifier masks from Apple's IOLLEvent.h distinguish the two sides.
+let modifierDeviceMasks: [UInt32: UInt64] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04,
+                                           59: 0x01, 62: 0x2000, 58: 0x20, 61: 0x40, 63: 0x800000]
+let allDeviceModifiers: UInt64 = 0x207F | 0x800000
+
+func carbonModifiers(_ flags: CGEventFlags) -> UInt32 {
+    var result: UInt32 = 0
+    if flags.contains(.maskControl) { result |= UInt32(controlKey) }
+    if flags.contains(.maskAlternate) { result |= UInt32(optionKey) }
+    if flags.contains(.maskShift) { result |= UInt32(shiftKey) }
+    if flags.contains(.maskCommand) { result |= UInt32(cmdKey) }
+    return result
+}
+
+func modifierFlag(_ keyCode: UInt32) -> UInt32 {
+    switch keyCode {
+    case 54, 55: return UInt32(cmdKey)
+    case 56, 60: return UInt32(shiftKey)
+    case 58, 61: return UInt32(optionKey)
+    case 59, 62: return UInt32(controlKey)
+    default: return 0
+    }
+}
+
+struct ModifierTapRecognizer {
+    let keyCode: UInt32
+    private(set) var held = false
+    private var armed = false
+
+    mutating func cancel() { armed = false }
+    mutating func flagsChanged(key: UInt32, flags: CGEventFlags) -> Bool {
+        guard key == keyCode, let deviceMask = modifierDeviceMasks[keyCode] else { cancel(); return false }
+        let down = flags.rawValue & deviceMask != 0
+        if down {
+            if !held {
+                let soloDevice = flags.rawValue & allDeviceModifiers == deviceMask
+                let soloModifier = carbonModifiers(flags) == modifierFlag(keyCode)
+                armed = soloDevice && soloModifier
+            }
+            held = true
+            return false
+        }
+        let fire = held && armed && carbonModifiers(flags) == 0 && flags.rawValue & allDeviceModifiers == 0
+        held = false
+        armed = false
+        return fire
+    }
+}
 
 struct KeyboardShortcut: Codable, Equatable {
     let keyCode: UInt32
     let modifiers: UInt32
 
     static let allowedModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
-    static let defaultReturn = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_H),
-                                                modifiers: UInt32(controlKey | optionKey))!
-    private static let modifierKeys: Set<UInt32> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+    static let defaultReturn = KeyboardShortcut(keyCode: UInt32(kVK_RightCommand), modifiers: 0)!
+    static let legacyDefault = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey))!
+    var isSingle: Bool { modifiers == 0 }
+    var isModifier: Bool { modifierDeviceMasks[keyCode] != nil }
 
     init?(keyCode: UInt32, modifiers: UInt32) {
-        guard keyCode < 127, keyCode != UInt32(kVK_Escape),
-              !Self.modifierKeys.contains(keyCode),
+        guard keyCode < 127, keyCode != UInt32(kVK_Escape), keyCode != UInt32(kVK_CapsLock),
               modifiers & ~Self.allowedModifiers == 0,
-              modifiers & UInt32(controlKey | cmdKey) != 0 else { return nil }
+              modifierDeviceMasks[keyCode] == nil || modifiers == 0 else { return nil }
         self.keyCode = keyCode
         self.modifiers = modifiers
     }
@@ -54,6 +106,8 @@ struct KeyboardShortcut: Codable, Equatable {
 
 private func keyLabel(_ code: UInt32) -> String {
     let names: [UInt32: String] = [
+        54: "右 Command ⌘", 55: "左 Command ⌘", 56: "左 Shift ⇧", 60: "右 Shift ⇧",
+        58: "左 Option ⌥", 61: "右 Option ⌥", 59: "左 Control ⌃", 62: "右 Control ⌃", 63: "Fn / 🌐",
         36: "↩", 48: "⇥", 49: "空格", 51: "⌫", 76: "⌤", 117: "⌦",
         115: "↖", 119: "↘", 116: "⇞", 121: "⇟", 123: "←", 124: "→", 125: "↓", 126: "↑",
         122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7",
@@ -81,9 +135,11 @@ private func keyLabel(_ code: UInt32) -> String {
 enum ShortcutError: Error {
     case systemConflict
     case registration(OSStatus)
+    case inputAccess
 
     var message: String {
         switch self {
+        case .inputAccess: return "单键快捷键需要鼠标控制和输入监控权限，请先允许权限"
         case .systemConflict: return "此组合键已用于系统快捷键，请换一个"
         case .registration(let code):
             return "此组合键无法注册或已被占用（\(code)），请换一个"
@@ -91,19 +147,24 @@ enum ShortcutError: Error {
     }
 }
 
-// Carbon delivers only the registered combination. No global key-event monitor is installed.
+// Combinations use Carbon. Single keys use a narrowly routed event tap; no text/history is stored.
 final class GlobalShortcut {
     private var reference: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var sequence: UInt32 = 0
     private var pressed = false
+    private var eventTap: CFMachPort?
+    private var eventSource: CFRunLoopSource?
+    private var modifierTap = ModifierTapRecognizer(keyCode: 54)
+    private var singlePressed = false
     private let signature: OSType = 0x54484F50 // THOP
     var shortcut = KeyboardShortcut.defaultReturn
     var onPress: (() -> Void)?
-    var isRegistered: Bool { reference != nil }
+    var isRegistered: Bool { reference != nil || eventTap != nil }
 
     func register(_ candidate: KeyboardShortcut) throws {
-        if candidate == shortcut && reference != nil { return }
+        if candidate == shortcut && isRegistered { return }
+        if candidate.isSingle { try registerSingle(candidate); return }
         var symbolic: Unmanaged<CFArray>?
         if CopySymbolicHotKeys(&symbolic) == noErr,
            let entries = symbolic?.takeRetainedValue() as? [[String: Any]],
@@ -132,10 +193,83 @@ final class GlobalShortcut {
         guard result == noErr, let replacement else { throw ShortcutError.registration(result) }
         // Keep an existing working registration if the replacement cannot be registered.
         if let reference { UnregisterEventHotKey(reference) }
+        removeEventTap()
         reference = replacement
         sequence = next
         shortcut = candidate
         pressed = false
+    }
+
+    private func registerSingle(_ candidate: KeyboardShortcut) throws {
+        guard AXIsProcessTrusted(), IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else {
+            throw ShortcutError.inputAccess
+        }
+        let types: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .rightMouseDown,
+                                   .otherMouseDown, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]
+        let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1) << $1.rawValue }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: mask, callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                let owner = Unmanaged<GlobalShortcut>.fromOpaque(context).takeUnretainedValue()
+                return owner.handleSingle(type: type, event: event)
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque()),
+            let source = CFMachPortCreateRunLoopSource(nil, tap, 0) else { throw ShortcutError.inputAccess }
+        pause()
+        shortcut = candidate
+        modifierTap = ModifierTapRecognizer(keyCode: candidate.keyCode)
+        eventTap = tap
+        eventSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func handleSingle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            modifierTap = ModifierTapRecognizer(keyCode: shortcut.keyCode)
+            singlePressed = false
+            if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+        guard eventTap != nil else { return Unmanaged.passUnretained(event) }
+        let key = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+        if shortcut.isModifier {
+            if type == .flagsChanged {
+                if modifierTap.flagsChanged(key: key, flags: event.flags) { scheduleAction() }
+            } else { modifierTap.cancel() }
+            // Preserve Command/Shift/etc. for normal combinations, clicks, and system behavior.
+            return Unmanaged.passUnretained(event)
+        }
+        if key == shortcut.keyCode && type == .keyDown {
+            if singlePressed { return nil }
+            if carbonModifiers(event.flags) == 0 && !event.flags.contains(.maskSecondaryFn) &&
+               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                singlePressed = true
+                scheduleAction()
+                return nil
+            }
+        }
+        if key == shortcut.keyCode && type == .keyUp && singlePressed {
+            singlePressed = false
+            return nil
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    private func scheduleAction() {
+        let generation = sequence
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRegistered, self.sequence == generation else { return }
+            self.onPress?()
+        }
+    }
+
+    private func removeEventTap() {
+        if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: false) }
+        if let eventSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), eventSource, .commonModes) }
+        if let eventTap { CFMachPortInvalidate(eventTap) }
+        eventSource = nil
+        eventTap = nil
+        singlePressed = false
     }
 
     private func handle(_ event: EventRef) -> OSStatus {
@@ -153,6 +287,8 @@ final class GlobalShortcut {
     func pause() {
         if let reference { UnregisterEventHotKey(reference) }
         reference = nil
+        removeEventTap()
+        sequence &+= 1
         pressed = false
     }
     deinit {
@@ -168,6 +304,7 @@ final class ShortcutRecorderButton: NSButton {
     var onCancel: (() -> Void)?
     var onCapture: ((KeyboardShortcut?) -> Bool)?
     private var monitor: Any?
+    private var recordingModifier: ModifierTapRecognizer?
     override var acceptsFirstResponder: Bool { true }
 
     override init(frame frameRect: NSRect) {
@@ -187,7 +324,7 @@ final class ShortcutRecorderButton: NSButton {
         updateTitle()
         window?.makeFirstResponder(self)
         // Local to this app and only while recording; also captures Command combinations before menus.
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self, self.recording else { return event }
             self.capture(event)
             return nil
@@ -197,7 +334,20 @@ final class ShortcutRecorderButton: NSButton {
         if recording { capture(event) } else { super.keyDown(with: event) }
     }
     private func capture(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            let key = UInt32(event.keyCode)
+            let flags = event.cgEvent?.flags ?? CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
+            if recordingModifier == nil, modifierDeviceMasks[key] != nil {
+                recordingModifier = ModifierTapRecognizer(keyCode: key)
+            }
+            if recordingModifier?.flagsChanged(key: key, flags: flags) == true,
+               onCapture?(KeyboardShortcut(keyCode: key, modifiers: 0)) == true { finishRecording() }
+            if carbonModifiers(flags) == 0 && flags.rawValue & allDeviceModifiers == 0 { recordingModifier = nil }
+            return
+        }
+        guard event.type == .keyDown else { recordingModifier?.cancel(); return }
         guard !event.isARepeat else { return }
+        recordingModifier?.cancel()
         if event.keyCode == UInt16(kVK_Escape) { cancelRecording(); return }
         if onCapture?(KeyboardShortcut(event: event)) == true { finishRecording() }
     }
@@ -205,6 +355,7 @@ final class ShortcutRecorderButton: NSButton {
         recording = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        recordingModifier = nil
         updateTitle()
     }
     func cancelRecording() {
@@ -216,13 +367,11 @@ final class ShortcutRecorderButton: NSButton {
         cancelRecording()
         return super.resignFirstResponder()
     }
-    private func updateTitle() { title = recording ? "请按组合键…（Esc 取消）" : "\(shortcut.title) · 点击更改" }
+    private func updateTitle() { title = recording ? "请按单键或组合键…（Esc 取消）" : "\(shortcut.title) · 点击更改" }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }
 
-// Core Graphics desktop coordinates, including main displays at nonzero/negative origins in fixtures.
-func primaryReturnPoint(cursor: CGPoint, bounds: CGRect) -> CGPoint? {
-    guard !bounds.isNull, !bounds.isInfinite, bounds.width > 1, bounds.height > 1,
-          cursor.x.isFinite, cursor.y.isFinite, !bounds.contains(cursor) else { return nil }
-    return CGPoint(x: bounds.midX, y: bounds.midY)
+func migratedShortcut(_ saved: KeyboardShortcut?, schema: Int) -> KeyboardShortcut {
+    guard let saved else { return .defaultReturn }
+    return schema < 3 && saved == .legacyDefault ? .defaultReturn : saved
 }
