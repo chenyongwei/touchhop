@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Restore each screen's last departure position when cycling screens; use the center only when that screen has no position yet.
+- Remember positions during normal mouse movement and touchscreen jumps, retaining the enlarged pointer and locator ring.
+- Keep one point per physical display in memory only, using relative coordinates across layout, resolution, and connection changes.
+- Reject delayed pointer events that would overwrite a newer position, including events queued before a display-layout change.
+- Expand deterministic checks to 71, covering independent screen positions, stale events, display identity, resizing, and edge coordinates.
+
 ## 0.3.0
 
 - Allow ordinary single keys and side-specific modifier keys; default to a solo right Command press/release.

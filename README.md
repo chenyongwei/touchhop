@@ -29,7 +29,7 @@ The app reads the device's declared coordinate limits instead of assuming the te
 - Single-finger press/release and dragging, with mouse click-count handling for double-clicks.
 - Optional 90°, 180°, and 270° coordinate rotation.
 - Configurable single-key or combination shortcuts, defaulting to the right Command key.
-- Repeated presses cycle between screen centers, with a temporary enlarged pointer locator.
+- Repeated presses cycle between screens, restoring the last position on each screen with a temporary enlarged pointer locator.
 - Saved target display, rotation, and enabled state.
 - Exclusive access to the matching touch mouse interfaces, preventing macOS from also mapping the same input to the wrong display.
 - A visible settings window with permission status, interface count, and input activity.
@@ -82,7 +82,9 @@ TouchHop uses a new app identity relative to the earlier local prototype named �
 
 ### Cycle between screens
 
-The default shortcut is **right Command**, pressed and released on its own. With two displays, each tap moves the cursor to the other screen's center; another tap brings it back. With more displays, TouchHop cycles through the active displays in main-display-first order. Display geometry is resolved on each press.
+The default shortcut is **right Command**, pressed and released on its own. With two displays, each tap returns the cursor to the position where it last left the other screen; another tap brings it back to its previous position on this screen. With more displays, TouchHop cycles through the active displays in main-display-first order. A screen with no remembered position uses its center.
+
+Positions are tracked during ordinary mouse movement and touchscreen jumps, so touching the external screen also preserves the departure position on the built-in screen. Each physical display has one position in memory, cleared when TouchHop quits. Display identity and relative coordinates let the position follow screen rearrangement, resolution changes, and reconnection; the restored point stays within the destination screen.
 
 In the **快捷键切换屏幕** section:
 
@@ -96,7 +98,7 @@ Each switch shows a roughly one-second enlarged pointer with a locator ring. Thi
 
 The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
 
-Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. It runs only while that shortcut is enabled, requires mouse-control and Input Monitoring access, and does not store key history or typed text. Recording listens locally in the settings window.
+Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. A separate passive mouse-only observer remembers the last point per display without changing or suppressing events. Both listeners run only while their shortcut feature is enabled and require mouse-control and Input Monitoring access. No key history, typed text, or pointer trajectory is stored. Recording listens locally in the settings window.
 
 ## How it works
 
@@ -106,7 +108,7 @@ If the selected display is unavailable, touch is not redirected to the built-in 
 
 ## Validation
 
-`./scripts/test.sh` runs 52 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, and pointer-overlay geometry. These checks do not open a HID device, install a keyboard event tap, register a global shortcut, request permissions, or post input.
+`./scripts/test.sh` runs 71 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, per-display position memory, layout/resolution changes, stale-event rejection, and pointer-overlay geometry. These checks do not open a HID device, install event taps, register a global shortcut, request permissions, or post input.
 
 The GitHub Actions workflow builds the app, runs these checks, and uploads a development ZIP. CI does not test physical touch hardware, permissions, or actual login startup.
 

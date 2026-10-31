@@ -114,6 +114,7 @@ final class TouchMapper {
     var lastClickPoint = CGPoint(x: -100000, y: -100000)
     var clickCount: Int64 = 1
     let eventSource = CGEventSource(stateID: .hidSystemState)
+    var onTouchStart: (() -> Void)?
 
     func targetBounds() -> CGRect? {
         guard let id = externalDisplays().first(where: { uuidForDisplay($0) == targetUUID }) else { return nil }
@@ -203,6 +204,7 @@ final class TouchMapper {
                                 bounds: bounds, rotation: rotation)
         if packet.down {
             if !isDown {
+                onTouchStart?()
                 activeLocation = session.location
                 activeBounds = bounds
                 let now = ProcessInfo.processInfo.systemUptime
@@ -227,6 +229,7 @@ final class TouchMapper {
         guard let event = CGEvent(mouseEventSource: eventSource, mouseType: type,
                                   mouseCursorPosition: point, mouseButton: .left) else { return }
         event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+        event.timestamp = mousePositionTimestamp()
         event.post(tap: .cghidEventTap)
         events += 1
     }
@@ -277,6 +280,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var isShortcutEnabled = true
     let cursorBeacon = CursorBeacon()
     var lastShortcutRetry: TimeInterval = 0
+    let mousePositionTracker = MousePositionTracker()
+    var screenPositions = ScreenPositionMemory()
 
     func label(_ text: String, size: CGFloat = 14, bold: Bool = false) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: text)
@@ -347,7 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button("预览指针放大", action: #selector(previewCursorBeacon))])
         shortcutRow.spacing = 12
         stack.addArrangedSubview(shortcutRow)
-        let shortcutHint = label("可录入单键或组合键；Esc 取消。单独按下并松开右 Command 可来回切屏，并短暂放大指针。字母单键会占用该键的普通输入。", size: 12)
+        let shortcutHint = label("可录入单键或组合键；Esc 取消。切回屏幕时恢复上次离开的位置，并短暂高亮；尚无记录时定位中央。字母单键会占用该键的普通输入。", size: 12)
         shortcutHint.textColor = .secondaryLabelColor
         stack.addArrangedSubview(shortcutHint)
         shortcutStatus = label("", size: 12)
@@ -361,6 +366,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor)])
         window.contentView = content
         window.center()
+        mousePositionTracker.onPosition = { [weak self] point, timestamp, screens in
+            self?.screenPositions.observe(point, screens: screens, timestamp: timestamp)
+        }
+        mapper.onTouchStart = { [weak self] in self?.mousePositionTracker.captureCurrentPosition() }
         refreshDisplays()
         configureReturnShortcut()
         showWindow()
@@ -424,7 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutRecorder.cancelRecording()
         isShortcutEnabled = shortcutEnabled.state == .on
         UserDefaults.standard.set(isShortcutEnabled, forKey: "returnToMainShortcutEnabled")
-        if !isShortcutEnabled { returnShortcut.pause() }
+        if !isShortcutEnabled { returnShortcut.pause(); mousePositionTracker.stop() }
         resumeReturnShortcut()
     }
     @objc func resetReturnShortcut() {
@@ -443,9 +452,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func cycleScreen() {
         guard AXIsProcessTrusted() else { shortcutStatus.stringValue = "请先允许鼠标控制权限"; return }
-        guard let cursor = CGEvent(source: nil)?.location,
-              let target = nextScreenDestination(cursor: cursor, screens: activeCycleScreens()) else { return }
-        let destination = target.center
+        guard let current = CGEvent(source: nil) else { return }
+        let screens = activeCycleScreens()
+        let timestamp = mousePositionTimestamp()
+        mousePositionTracker.updateScreens(screens, since: timestamp)
+        screenPositions.observe(current.location, screens: screens, timestamp: timestamp)
+        guard let target = nextScreenDestination(cursor: current.location, screens: screens),
+              let destination = screenPositions.destination(for: target) else { return }
+        let remembered = screenPositions.hasPosition(for: target)
         if CGEventSource.buttonState(.combinedSessionState, button: .right) ||
            CGEventSource.buttonState(.combinedSessionState, button: .center) ||
            (!mapper.isDown && CGEventSource.buttonState(.combinedSessionState, button: .left)) {
@@ -455,12 +469,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard CGWarpMouseCursorPosition(destination) == .success else {
             shortcutStatus.stringValue = "无法移动鼠标，请检查鼠标控制权限"; return
         }
-        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: destination,
-                mouseButton: .left)?.post(tap: .cghidEventTap)
+        if let moved = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                               mouseCursorPosition: destination, mouseButton: .left) {
+            moved.timestamp = mousePositionTimestamp()
+            moved.post(tap: .cghidEventTap)
+            screenPositions.observe(destination, screens: screens, timestamp: moved.timestamp)
+        }
         cursorBeacon.show(at: destination)
-        shortcutStatus.stringValue = "已切换到屏幕中央：\(displayName(target.id))"
+        shortcutStatus.stringValue = remembered ? "已回到上次离开的位置：\(displayName(target.id))" : "尚无位置记录，已定位中央：\(displayName(target.id))"
     }
     func refreshDisplays() {
+        mousePositionTracker.updateScreens(activeCycleScreens(), since: mousePositionTimestamp())
         let saved = UserDefaults.standard.string(forKey: "displayUUID")
         displayIDs = externalDisplays()
         displayPicker.removeAllItems()
@@ -523,6 +542,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let monitoring = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
         permissionLabel.stringValue = "鼠标控制：\(control ? "已允许" : "待允许")    输入监控：\(monitoring ? "已允许" : "待允许")"
         if mapper.running && (!control || !monitoring) { mapper.stop() }
+        if isShortcutEnabled && control && monitoring {
+            if !mousePositionTracker.isRunning {
+                shortcutStatus.stringValue = mousePositionTracker.start() ? "已开始记忆各屏幕离开位置" : "位置记忆尚未启用，请检查输入监控权限"
+            }
+        } else { mousePositionTracker.stop() }
         if savedShortcut.isSingle && (!control || !monitoring) && returnShortcut.isRegistered {
             returnShortcut.pause()
             shortcutStatus.stringValue = "单键快捷键等待鼠标控制和输入监控权限"
@@ -542,7 +566,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow(); return false
     }
-    func applicationWillTerminate(_ notification: Notification) { cursorBeacon.stop(); returnShortcut.pause(); mapper.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        cursorBeacon.stop(); mousePositionTracker.stop(); returnShortcut.pause(); mapper.stop()
+    }
 }
 
 func selfTest() {
@@ -639,6 +665,49 @@ func selfTest() {
     var fnTap = ModifierTapRecognizer(keyCode: 63)
     _ = fnTap.flagsChanged(key: 63, flags: .maskSecondaryFn)
     require(fnTap.flagsChanged(key: 63, flags: []), "Fn single key")
+
+    let screenA = ScreenDestination(id: 41, bounds: CGRect(x: 0, y: 0, width: 1000, height: 800), identity: "panel-A")
+    let screenB = ScreenDestination(id: 42, bounds: CGRect(x: -1200, y: 0, width: 1200, height: 900), identity: "panel-B")
+    let pair = [screenA, screenB]
+    var memory = ScreenPositionMemory()
+    func near(_ point: CGPoint?, _ expected: CGPoint) -> Bool {
+        guard let point else { return false }
+        return hypot(point.x - expected.x, point.y - expected.y) < 0.000001
+    }
+    require(memory.destination(for: screenB) == screenB.center, "unvisited screen falls back to center")
+    require(!memory.hasPosition(for: screenB), "fallback does not create a false history")
+    memory.observe(CGPoint(x: 250, y: 200), screens: pair, timestamp: 10)
+    require(near(memory.destination(for: screenA), CGPoint(x: 250, y: 200)), "remember local cursor point")
+    memory.observe(CGPoint(x: -900, y: 300), screens: pair, timestamp: 20)
+    require(near(memory.destination(for: screenA), CGPoint(x: 250, y: 200)), "direct touch jump preserves departed display")
+    require(near(memory.destination(for: screenB), CGPoint(x: -900, y: 300)), "remember destination display independently")
+    memory.observe(CGPoint(x: 10, y: 10), screens: pair, timestamp: 5)
+    require(near(memory.destination(for: screenA), CGPoint(x: 250, y: 200)), "delayed event cannot overwrite a newer cursor point")
+    memory.observe(CGPoint(x: CGFloat.nan, y: 10), screens: pair, timestamp: 100)
+    require(near(memory.destination(for: screenA), CGPoint(x: 250, y: 200)), "invalid pointer sample ignored")
+    memory.observe(CGPoint(x: 9000, y: 9000), screens: pair, timestamp: 100)
+    require(near(memory.destination(for: screenB), CGPoint(x: -900, y: 300)), "off-desktop sample ignored")
+    memory.observe(CGPoint(x: 600, y: 480), screens: pair, timestamp: 30)
+    require(near(memory.destination(for: screenA), CGPoint(x: 600, y: 480)), "latest point replaces the old point")
+    memory.observe(CGPoint(x: -500, y: 450), screens: pair, timestamp: 40)
+    memory.observe(CGPoint(x: -800, y: 50), screens: pair, timestamp: 35)
+    require(near(memory.destination(for: screenB), CGPoint(x: -500, y: 450)), "arrival timestamp protects target history")
+    let movedA = ScreenDestination(id: 41, bounds: CGRect(x: -2000, y: -500, width: 1000, height: 800), identity: "panel-A")
+    require(near(memory.destination(for: movedA), CGPoint(x: -1400, y: -20)), "display rearrangement preserves screen-relative point")
+    let resizedA = ScreenDestination(id: 141, bounds: CGRect(x: -1000, y: -400, width: 2000, height: 1600), identity: "panel-A")
+    require(near(memory.destination(for: resizedA), CGPoint(x: 200, y: 560)), "resizing and reconnection use physical display identity")
+    let replacement = ScreenDestination(id: 41, bounds: screenA.bounds, identity: "different-panel")
+    require(memory.destination(for: replacement) == replacement.center, "recycled display ID does not inherit another panel's point")
+    require(!memory.hasPosition(for: replacement), "physical identities remain independent")
+    require(memory.destination(for: ScreenDestination(id: 99, bounds: .null)) == nil, "invalid target geometry rejected")
+    let edge = CGPoint(x: 999.999, y: 799.999)
+    memory.observe(edge, screens: pair, timestamp: 50)
+    require(near(memory.destination(for: screenA), edge), "fractional edge coordinates retained")
+    require(screenA.bounds.contains(memory.destination(for: screenA)!), "restored edge remains inside its screen")
+    require(ScreenPositionMemory().destination(for: screenA) == screenA.center, "history is session-only")
+    memory.observe(CGPoint(x: 500, y: 400), screens: pair, timestamp: 200)
+    memory.observe(CGPoint(x: -600, y: 225), screens: pair, timestamp: 150)
+    require(near(memory.destination(for: screenB), CGPoint(x: -600, y: 225)), "event ordering is guarded separately per display")
     print("PASS: \(checks) packet, coordinate and shortcut checks; no device opened and no input posted")
 }
 
