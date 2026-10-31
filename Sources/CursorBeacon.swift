@@ -7,21 +7,45 @@ private final class EnlargedCursorView: NSView {
     var image = NSCursor.arrow.image
     var hotspot = NSCursor.arrow.hotSpot
     var progress: CGFloat = 0
+    var reduceMotion = false
 
     override func draw(_ dirtyRect: NSRect) {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let radius = 27 + 12 * sin(progress * .pi)
-        NSColor.systemYellow.withAlphaComponent(0.75 * (1 - progress * 0.6)).setStroke()
+        let radius = reduceMotion ? 39 : 36 + 5 * sin(progress * .pi)
         let ring = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
                                              width: radius * 2, height: radius * 2))
-        ring.lineWidth = 3
+        // Opaque dark and light rims preserve the silhouette even when a rainbow color matches the background.
+        NSColor.black.withAlphaComponent(0.95).setStroke()
+        ring.lineWidth = 14
         ring.stroke()
+        NSColor.white.setStroke()
+        ring.lineWidth = 10
+        ring.stroke()
+        let phase = reduceMotion ? 0 : progress * 0.8
+        let segments = 180
+        for index in 0..<segments {
+            let fraction = CGFloat(index) / CGFloat(segments)
+            NSColor(calibratedHue: (fraction + phase).truncatingRemainder(dividingBy: 1),
+                    saturation: 0.88, brightness: 1, alpha: 1).setStroke()
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: center, radius: radius,
+                          startAngle: fraction * 360, endAngle: fraction * 360 + 2.4)
+            arc.lineWidth = 7
+            arc.stroke()
+        }
         let scale = min(3, 82 / max(1, max(image.size.width, image.size.height)))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let rect = CGRect(x: center.x - hotspot.x * scale,
                           y: center.y - (image.size.height - hotspot.y) * scale,
                           width: size.width, height: size.height)
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.65)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = .zero
+        shadow.set()
         image.draw(in: rect)
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
@@ -39,6 +63,7 @@ final class CursorBeacon {
         let view = EnlargedCursorView(frame: CGRect(x: 0, y: 0, width: size, height: size))
         view.image = cursor.image
         view.hotspot = cursor.hotSpot
+        view.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let panel = NSPanel(contentRect: view.bounds, styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
         panel.title = "TouchHop 指针放大提示"

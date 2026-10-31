@@ -260,12 +260,21 @@ final class TouchMapper {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let mapper = TouchMapper()
     var window: NSWindow!
     var displayPicker: NSPopUpButton!
     var rotationPicker: NSPopUpButton!
-    var permissionLabel: NSTextField!
+    var summaryLabel: NSTextField!
+    var controlStateLabel: NSTextField!
+    var monitoringStateLabel: NSTextField!
+    var controlPermissionButton: NSButton!
+    var monitoringPermissionButton: NSButton!
+    var detailsButton: NSButton!
+    var statusItem: NSStatusItem!
+    var menuStatus: NSMenuItem!
+    var menuTouchToggle: NSMenuItem!
+    var menuShortcutToggle: NSMenuItem!
     var statusLabel: NSTextField!
     var dataLabel: NSTextField!
     var toggleButton: NSButton!
@@ -286,86 +295,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func label(_ text: String, size: CGFloat = 14, bold: Bool = false) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: text)
         field.font = bold ? .boldSystemFont(ofSize: size) : .systemFont(ofSize: size)
-        field.widthAnchor.constraint(equalToConstant: 510).isActive = true
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return field
     }
     func button(_ text: String, action: Selector) -> NSButton {
         NSButton(title: text, target: self, action: action)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "显示设置窗口", action: #selector(showWindow), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: "关闭窗口", action: #selector(closeSettingsWindow), keyEquivalent: "w").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出 TouchHop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         NSApp.mainMenu = mainMenu
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 740),
-            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "TouchHop"
-        window.isReleasedWhenClosed = false
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 15
-        stack.edgeInsets = NSEdgeInsets(top: 26, left: 28, bottom: 24, right: 28)
-        stack.addArrangedSubview(label("点外屏，鼠标直接到对应位置", size: 21, bold: true))
-        stack.addArrangedSubview(label("专用于当前 TOUCH 外屏。支持点按、双击和单指拖动；普通鼠标和 Mac 触控板照常使用。"))
-        displayPicker = NSPopUpButton()
-        displayPicker.target = self
-        displayPicker.action = #selector(changeDisplay)
-        displayPicker.widthAnchor.constraint(equalToConstant: 510).isActive = true
-        stack.addArrangedSubview(label("触控目标屏幕", bold: true))
-        stack.addArrangedSubview(displayPicker)
-        rotationPicker = NSPopUpButton()
-        rotationPicker.addItems(withTitles: ["方向正常（0°）", "顺时针 90°", "旋转 180°", "逆时针 90°"])
-        rotationPicker.target = self
-        rotationPicker.action = #selector(changeRotation)
-        rotationPicker.selectItem(at: UserDefaults.standard.integer(forKey: "rotation") / 90)
-        stack.addArrangedSubview(rotationPicker)
-        permissionLabel = label("")
-        stack.addArrangedSubview(permissionLabel)
-        let permissionButtons = NSStackView(views: [
-            button("1. 允许鼠标控制", action: #selector(requestControl)),
-            button("2. 打开输入监控设置", action: #selector(openMonitoring))])
-        permissionButtons.spacing = 12
-        stack.addArrangedSubview(permissionButtons)
-        toggleButton = button("启用触控定位", action: #selector(toggle))
-        toggleButton.bezelStyle = .rounded
-        stack.addArrangedSubview(toggleButton)
-        statusLabel = label("尚未启用", bold: true)
-        dataLabel = label("尚未收到触控数据", size: 12)
-        dataLabel.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(statusLabel)
-        stack.addArrangedSubview(dataLabel)
-        stack.addArrangedSubview(label("快捷键切换屏幕", bold: true))
-        shortcutEnabled = NSButton(checkboxWithTitle: "启用切屏快捷键", target: self,
-                                   action: #selector(toggleReturnShortcut))
-        stack.addArrangedSubview(shortcutEnabled)
-        shortcutRecorder = ShortcutRecorderButton()
-        shortcutRecorder.bezelStyle = .rounded
-        let shortcutRow = NSStackView(views: [shortcutRecorder,
-            button("恢复默认", action: #selector(resetReturnShortcut)),
-            button("预览指针放大", action: #selector(previewCursorBeacon))])
-        shortcutRow.spacing = 12
-        stack.addArrangedSubview(shortcutRow)
-        let shortcutHint = label("可录入单键或组合键；Esc 取消。切回屏幕时恢复上次离开的位置，并短暂高亮；尚无记录时定位中央。字母单键会占用该键的普通输入。", size: 12)
-        shortcutHint.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(shortcutHint)
-        shortcutStatus = label("", size: 12)
-        stack.addArrangedSubview(shortcutStatus)
-        let content = NSView()
-        content.addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor)])
-        window.contentView = content
-        window.center()
+        buildSettingsWindow()
+        setupStatusItem()
         mousePositionTracker.onPosition = { [weak self] point, timestamp, screens in
             self?.screenPositions.observe(point, screens: screens, timestamp: timestamp)
         }
@@ -383,7 +332,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatus()
     }
 
-    @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func showWindow() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        shortcutRecorder.cancelRecording()
+        sender.orderOut(nil)
+        return false
+    }
+    @objc func closeSettingsWindow() { window.performClose(nil) }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func configureReturnShortcut() {
         let defaults = UserDefaults.standard
         let decoded = defaults.data(forKey: "returnToMainShortcut").flatMap {
@@ -540,7 +499,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refreshStatus() {
         let control = AXIsProcessTrusted()
         let monitoring = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-        permissionLabel.stringValue = "鼠标控制：\(control ? "已允许" : "待允许")    输入监控：\(monitoring ? "已允许" : "待允许")"
+        controlStateLabel.stringValue = control ? "已允许" : "待允许"
+        monitoringStateLabel.stringValue = monitoring ? "已允许" : "待允许"
+        controlStateLabel.textColor = control ? .systemGreen : .secondaryLabelColor
+        monitoringStateLabel.textColor = monitoring ? .systemGreen : .secondaryLabelColor
+        controlPermissionButton.title = control ? "查看设置" : "允许控制"
+        monitoringPermissionButton.title = monitoring ? "查看设置" : "允许监控"
         if mapper.running && (!control || !monitoring) { mapper.stop() }
         if isShortcutEnabled && control && monitoring {
             if !mousePositionTracker.isRunning {
@@ -561,6 +525,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         toggleButton.title = mapper.running ? "停用触控定位" : "启用触控定位"
         statusLabel.stringValue = mapper.message
+        let needsPermission = !control || !monitoring
+        summaryLabel.stringValue = needsPermission ? "● 待授权" : (mapper.running ? "● 运行中" : "● 触控已暂停")
+        summaryLabel.textColor = needsPermission ? .systemOrange : (mapper.running ? .systemGreen : .secondaryLabelColor)
+        updateStatusItem()
         dataLabel.stringValue = "已连接触控接口：\(mapper.sessions.count) · 已发送操作：\(mapper.events)\n\(mapper.lastReport)"
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

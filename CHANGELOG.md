@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Group native settings into touchscreen, shortcut, and permission cards, with aligned controls, concise status, expandable connection details, and scrolling.
+- Keep the app in the menu bar when settings close, hide its Dock icon, and reopen settings or quit through the TouchHop menu.
+- Add menu actions for touch mapping, shortcut toggling, and locator preview, plus Command + W to close settings.
+- Replace the yellow locator with an animated rainbow ring and opaque black/white rims for contrast across backgrounds; retain the enlarged pointer, automatic fade, and click-through behavior.
+- Respect Reduce Motion by keeping the rainbow ring static.
+
 ## 0.4.0
 
 - Restore each screen's last departure position when cycling screens; use the center only when that screen has no position yet.

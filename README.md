@@ -69,8 +69,8 @@ ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip
 1. Quit any other touch-mapping app using the same panel.
 2. Copy `build/TouchHop.app` to Applications, then open it.
 3. Select the target external display.
-4. Use **1. 允许鼠标控制** to grant Accessibility / mouse-control access. macOS may label this panel **Device Control and Data Access**. Complete any system authentication yourself.
-5. Use **2. 打开输入监控设置** to request Input Monitoring. If macOS asks you to restart the app, do so.
+4. In **权限与状态**, use **允许控制** to grant Accessibility / mouse-control access. macOS may label this panel **Device Control and Data Access**. Complete any system authentication yourself.
+5. Use **允许监控** to request Input Monitoring. If macOS asks you to restart the app, do so.
 6. Click **启用触控定位** to enable mapping. Place the cursor on the built-in display, then touch an empty area on the external screen to check alignment.
 7. If necessary, change the rotation setting and check the corners and center again.
 
@@ -94,7 +94,13 @@ In the **快捷键切换屏幕** section:
 - An ordinary single key is consumed as a shortcut while enabled; assigning a letter or Space replaces its unmodified typing behavior. Modified uses of that key remain available.
 - The shortcut and enabled state persist across restarts. On the first upgrade from 0.2, the former default `⌃⌥H` migrates to right Command. Other custom bindings are retained.
 
-Each switch shows a roughly one-second enlarged pointer with a locator ring. This is a click-through overlay that follows the cursor and fades automatically; it does not permanently change macOS pointer-size preferences. **预览指针放大** previews this effect without moving the cursor.
+Each switch shows a roughly one-second enlarged pointer with an animated rainbow ring. Opaque black and white rims keep the ring distinct on light, dark, and similarly colored backgrounds. This is a click-through overlay that follows the cursor and fades automatically; it does not permanently change macOS pointer-size preferences. **预览效果** previews it without moving the cursor. With macOS Reduce Motion enabled, the rainbow remains static while the overlay still fades away.
+
+## Settings and menu bar
+
+Settings are grouped into **触控屏幕** (touchscreen), **切屏快捷键** (screen-switch shortcut), and **权限与状态** (permissions and status). Connection counters are available under **查看连接详情**, and the window can scroll at smaller sizes.
+
+TouchHop lives in the menu bar without a Dock icon. Closing the settings window, including Command + W, keeps touch mapping, shortcuts, and position memory running. Click the TouchHop pointer icon in the menu bar to reopen settings, preview the rainbow locator, toggle features, or quit. **退出 TouchHop** quits the app and releases its devices; Command + Q also quits while its settings window is active.
 
 The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
 
