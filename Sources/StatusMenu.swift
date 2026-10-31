@@ -26,7 +26,7 @@ extension AppDelegate {
         _ = add("打开设置…", #selector(showWindow), key: ",")
         _ = add("预览炫彩高亮", #selector(previewCursorBeacon))
         menu.addItem(.separator())
-        menuTouchToggle = add("停用触控定位", #selector(toggle))
+        menuTouchToggle = add("触控定位", #selector(toggle))
         menuShortcutToggle = add("切屏快捷键", #selector(toggleShortcutFromMenu))
         menu.addItem(.separator())
         let quit = menu.addItem(withTitle: "退出 TouchHop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -36,7 +36,7 @@ extension AppDelegate {
 
     func updateStatusItem() {
         menuStatus.title = "TouchHop · \(summaryLabel.stringValue.replacingOccurrences(of: "● ", with: ""))"
-        menuTouchToggle.title = mapper.running ? "停用触控定位" : "启用触控定位"
+        menuTouchToggle.state = mapper.running ? .on : .off
         menuShortcutToggle.state = isShortcutEnabled ? .on : .off
         statusItem.button?.toolTip = "\(menuStatus.title)\n\(mapper.message)"
     }

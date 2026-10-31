@@ -102,6 +102,8 @@ Settings are grouped into **触控屏幕** (touchscreen), **切屏快捷键** (s
 
 TouchHop lives in the menu bar without a Dock icon. Closing the settings window, including Command + W, keeps touch mapping, shortcuts, and position memory running. Click the TouchHop pointer icon in the menu bar to reopen settings, preview the rainbow locator, toggle features, or quit. **退出 TouchHop** quits the app and releases its devices; Command + Q also quits while its settings window is active.
 
+The **触控定位** menu item is checked while touch mapping is running. Click it to disable mapping and clear the checkmark; click again to enable it. Mapping defaults to enabled once the required permissions and display are available, and a manually disabled state is saved across restarts.
+
 If the pointer icon is missing, check **System Settings → Menu Bar → Allow in the Menu Bar**. In a menu bar manager such as Frost, keep TouchHop in the **Visible** section and move it next to icons you can already see. A crowded menu bar may clip an item even when it is allowed and marked visible. Opening the TouchHop app again also reopens settings without resetting the running session.
 
 The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.

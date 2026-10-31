@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Keep the menu item named “触控定位” and show a checkmark while touch mapping is running; clicking it toggles mapping off or on.
+- Enable touch mapping by default once permissions and the selected display are available, retaining an explicitly saved disabled preference.
+
 ## 0.5.0
 
 - Group native settings into touchscreen, shortcut, and permission cards, with aligned controls, concise status, expandable connection details, and scrolling.

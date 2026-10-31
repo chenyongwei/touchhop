@@ -302,6 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSButton(title: text, target: self, action: action)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: ["enabled": true])
         NSApp.setActivationPolicy(.accessory)
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
