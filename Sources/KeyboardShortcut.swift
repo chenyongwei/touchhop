@@ -35,6 +35,8 @@ struct ModifierTapRecognizer {
     private(set) var held = false
     private var armed = false
 
+    init(keyCode: UInt32) { self.keyCode = keyCode }
+
     mutating func cancel() { armed = false }
     mutating func flagsChanged(key: UInt32, flags: CGEventFlags) -> Bool {
         guard key == keyCode, let deviceMask = modifierDeviceMasks[keyCode] else { cancel(); return false }
