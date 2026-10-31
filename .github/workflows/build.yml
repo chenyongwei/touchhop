@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build
         run: ./scripts/build.sh
-      - name: Run packet and coordinate checks
+      - name: Run input, coordinate and shortcut checks
         run: ./scripts/test.sh
       - name: Package development build
         run: ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip

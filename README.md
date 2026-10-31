@@ -28,6 +28,7 @@ The app reads the device's declared coordinate limits instead of assuming the te
 - Direct touch-to-cursor positioning across displays.
 - Single-finger press/release and dragging, with mouse click-count handling for double-clicks.
 - Optional 90°, 180°, and 270° coordinate rotation.
+- A configurable global shortcut to return the cursor to the current main display.
 - Saved target display, rotation, and enabled state.
 - Exclusive access to the matching touch mouse interfaces, preventing macOS from also mapping the same input to the wrong display.
 - A visible settings window with permission status, interface count, and input activity.
@@ -78,15 +79,29 @@ For login startup, add TouchHop in **System Settings → General → Login Items
 
 TouchHop uses a new app identity relative to the earlier local prototype named 外屏触控定位. Its permissions and preferences are separate. Quit the prototype before enabling TouchHop; this repository does not replace or modify an existing installation.
 
+### Return to the main display
+
+The default shortcut is **Control + Option + H** (`⌃⌥H`). It moves the pointer to the center of the system's current main display. If the pointer is already on that display, it stays where it is. TouchHop resolves the main display on each press, so changing the primary display in System Settings is respected.
+
+In the **返回当前主屏** section:
+
+- Click the displayed combination and press your preferred shortcut, including Control or Command plus another key. Press Escape to cancel recording.
+- **恢复默认** restores `⌃⌥H`; **启用返回主屏快捷键** enables or disables this feature independently of touch mapping.
+- The combination and enabled state are saved across app restarts. A rejected/conflicting replacement does not overwrite the previous saved shortcut.
+
+The shortcut is available while other apps are in front, and does not click or focus a window. Release a physical mouse drag before using it. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
+
+Global shortcuts use Carbon's registered-hotkey API. Only the configured combination is delivered; TouchHop does not install a global keyboard-event monitor. Shortcut recording listens locally while its settings recorder is active.
+
 ## How it works
 
 TouchHop matches only the configured USB vendor/product and the absolute mouse interface. It takes exclusive access through IOKit, decodes each complete report, converts the position into the selected display's current global bounds, and posts mouse events through Core Graphics. Relative mouse motion, the built-in trackpad, keyboards, and pen/digitizer interfaces are outside this filter.
 
-If the selected display is unavailable, touch is not redirected to the built-in display. Settings are kept in local `UserDefaults`; touch trajectories and keyboard input are not recorded.
+If the selected display is unavailable, touch is not redirected to the built-in display. Settings, including the chosen shortcut, are kept in local `UserDefaults`; touch trajectories, typing history, and typed text are not recorded.
 
 ## Validation
 
-`./scripts/test.sh` runs 11 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, and rotations. These checks do not open a HID device, request permissions, or post input.
+`./scripts/test.sh` runs 25 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence, and main-display return geometry. These checks do not open a HID device, register a global shortcut, request permissions, or post input.
 
 The GitHub Actions workflow builds the app, runs these checks, and uploads a development ZIP. CI does not test physical touch hardware, permissions, or actual login startup.
 

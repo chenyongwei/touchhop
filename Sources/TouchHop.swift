@@ -8,6 +8,7 @@ import IOKit.hid
 import CoreGraphics
 import ColorSync
 import ApplicationServices
+import Carbon
 
 // This utility accepts only the absolute Mouse interface observed on this panel.
 // The built-in trackpad, keyboards, digitizer/pen interfaces and other mice are excluded.
@@ -108,7 +109,7 @@ final class TouchMapper {
     var isDown = false
     var lastPoint = CGPoint.zero
     var activeBounds = CGRect.zero
-    var suppressedUntilRelease = false
+    var suppressedLocation: Int?
     var lastClickTime: TimeInterval = 0
     var lastClickPoint = CGPoint(x: -100000, y: -100000)
     var clickCount: Int64 = 1
@@ -144,6 +145,7 @@ final class TouchMapper {
             let mapper = Unmanaged<TouchMapper>.fromOpaque(ctx).takeUnretainedValue()
             let location = (IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber)?.intValue ?? 0
             if mapper.activeLocation == location { mapper.releasePointer() }
+            if mapper.suppressedLocation == location { mapper.suppressedLocation = nil }
             mapper.sessions.removeValue(forKey: location)
         }, context)
         IOHIDManagerScheduleWithRunLoop(m, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
@@ -179,19 +181,19 @@ final class TouchMapper {
         guard let packet = decodeMouseReport(bytes, reportID: reportID, maxX: session.maxX, maxY: session.maxY) else {
             invalidReports += 1; return
         }
-        if suppressedUntilRelease {
-            if !packet.down { suppressedUntilRelease = false }
+        if let suppressedLocation {
+            if session.location == suppressedLocation && !packet.down { self.suppressedLocation = nil }
             return
         }
         guard let bounds = targetBounds() else {
             releasePointer()
-            suppressedUntilRelease = packet.down
+            suppressedLocation = packet.down ? session.location : nil
             message = "外屏未连接，触控已暂停"
             return
         }
         if isDown && bounds != activeBounds {
             releasePointer()
-            suppressedUntilRelease = packet.down
+            suppressedLocation = packet.down ? session.location : nil
             return
         }
         // The display exposes two USB controller locations. One contact owns the
@@ -235,6 +237,12 @@ final class TouchMapper {
         activeLocation = nil
     }
 
+    func suspendTouchForCursorReturn() {
+        let location = activeLocation
+        releasePointer()
+        if let location { suppressedLocation = location }
+    }
+
     func stop() {
         running = false
         releasePointer()
@@ -244,7 +252,7 @@ final class TouchMapper {
         }
         manager = nil
         sessions.removeAll()
-        suppressedUntilRelease = false
+        suppressedLocation = nil
         message = "触控定位已停用，系统恢复原来的触控方式"
     }
 }
@@ -261,6 +269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var displayIDs: [CGDirectDisplayID] = []
     var timer: Timer?
     var autoStartPending = false
+    let returnShortcut = GlobalShortcut()
+    var shortcutRecorder: ShortcutRecorderButton!
+    var shortcutEnabled: NSButton!
+    var shortcutStatus: NSTextField!
+    var savedShortcut = KeyboardShortcut.defaultReturn
+    var isShortcutEnabled = true
 
     func label(_ text: String, size: CGFloat = 14, bold: Bool = false) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: text)
@@ -282,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "退出 TouchHop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         NSApp.mainMenu = mainMenu
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 510),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 740),
             styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "TouchHop"
         window.isReleasedWhenClosed = false
@@ -320,6 +334,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dataLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(statusLabel)
         stack.addArrangedSubview(dataLabel)
+        stack.addArrangedSubview(label("返回当前主屏", bold: true))
+        shortcutEnabled = NSButton(checkboxWithTitle: "启用返回主屏快捷键", target: self,
+                                   action: #selector(toggleReturnShortcut))
+        stack.addArrangedSubview(shortcutEnabled)
+        shortcutRecorder = ShortcutRecorderButton()
+        shortcutRecorder.bezelStyle = .rounded
+        let shortcutRow = NSStackView(views: [shortcutRecorder,
+            button("恢复默认", action: #selector(resetReturnShortcut))])
+        shortcutRow.spacing = 12
+        stack.addArrangedSubview(shortcutRow)
+        let shortcutHint = label("点击组合键可重新录入。需包含 Control 或 Command；Esc 取消。鼠标返回当前主屏中央，已在主屏时保持原位。", size: 12)
+        shortcutHint.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(shortcutHint)
+        shortcutStatus = label("", size: 12)
+        stack.addArrangedSubview(shortcutStatus)
         let content = NSView()
         content.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -330,16 +359,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = content
         window.center()
         refreshDisplays()
+        configureReturnShortcut()
         showWindow()
         timer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in self?.refreshStatus() }
         NotificationCenter.default.addObserver(self, selector: #selector(displaysChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowResignedKey),
+            name: NSWindow.didResignKeyNotification, object: window)
         // An enabled installation resumes only after the same two system grants exist.
         autoStartPending = UserDefaults.standard.bool(forKey: "enabled")
         refreshStatus()
     }
 
     @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func configureReturnShortcut() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: "returnToMainShortcut"),
+           let decoded = try? JSONDecoder().decode(KeyboardShortcut.self, from: data) { savedShortcut = decoded }
+        isShortcutEnabled = defaults.object(forKey: "returnToMainShortcutEnabled") as? Bool ?? true
+        shortcutEnabled.state = isShortcutEnabled ? .on : .off
+        shortcutRecorder.shortcut = savedShortcut
+        returnShortcut.onPress = { [weak self] in self?.returnToMainScreen() }
+        shortcutRecorder.onBegin = { [weak self] in
+            self?.returnShortcut.pause()
+            self?.shortcutStatus.stringValue = "请按下新的组合键；按 Esc 保留原来的快捷键"
+        }
+        shortcutRecorder.onCancel = { [weak self] in self?.resumeReturnShortcut() }
+        shortcutRecorder.onCapture = { [weak self] candidate in
+            guard let self else { return false }
+            guard let candidate else {
+                self.shortcutStatus.stringValue = "组合键需包含 Control 或 Command，并加上一个其他按键"
+                return false
+            }
+            do {
+                if self.isShortcutEnabled { try self.returnShortcut.register(candidate) }
+                self.savedShortcut = candidate
+                self.shortcutRecorder.shortcut = candidate
+                defaults.set(try JSONEncoder().encode(candidate), forKey: "returnToMainShortcut")
+                self.shortcutStatus.stringValue = self.isShortcutEnabled ? "快捷键已保存：\(candidate.title)" : "快捷键已保存，当前未启用"
+                return true
+            } catch {
+                self.shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法保存快捷键，请重试"
+                return false
+            }
+        }
+        resumeReturnShortcut()
+    }
+    func resumeReturnShortcut() {
+        guard isShortcutEnabled else { shortcutStatus.stringValue = "返回主屏快捷键已停用"; return }
+        do {
+            try returnShortcut.register(savedShortcut)
+            shortcutStatus.stringValue = "快捷键已启用：\(savedShortcut.title)"
+        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法注册快捷键" }
+    }
+    @objc func windowResignedKey() { shortcutRecorder.cancelRecording() }
+    @objc func toggleReturnShortcut() {
+        shortcutRecorder.cancelRecording()
+        isShortcutEnabled = shortcutEnabled.state == .on
+        UserDefaults.standard.set(isShortcutEnabled, forKey: "returnToMainShortcutEnabled")
+        if !isShortcutEnabled { returnShortcut.pause() }
+        resumeReturnShortcut()
+    }
+    @objc func resetReturnShortcut() {
+        shortcutRecorder.cancelRecording()
+        do {
+            let candidate = KeyboardShortcut.defaultReturn
+            if isShortcutEnabled { try returnShortcut.register(candidate) }
+            savedShortcut = candidate
+            shortcutRecorder.shortcut = candidate
+            UserDefaults.standard.set(try JSONEncoder().encode(candidate), forKey: "returnToMainShortcut")
+            resumeReturnShortcut()
+        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法恢复默认快捷键" }
+    }
+    func returnToMainScreen() {
+        guard AXIsProcessTrusted() else { shortcutStatus.stringValue = "请先允许鼠标控制权限"; return }
+        let display = CGMainDisplayID() // Resolve the current system main display on every press.
+        guard CGDisplayIsActive(display) != 0, let cursor = CGEvent(source: nil)?.location else { return }
+        guard let destination = primaryReturnPoint(cursor: cursor, bounds: CGDisplayBounds(display)) else {
+            shortcutStatus.stringValue = "鼠标已在当前主屏"; return
+        }
+        if CGEventSource.buttonState(.combinedSessionState, button: .right) ||
+           CGEventSource.buttonState(.combinedSessionState, button: .center) ||
+           (!mapper.isDown && CGEventSource.buttonState(.combinedSessionState, button: .left)) {
+            shortcutStatus.stringValue = "请先松开鼠标按键，再返回主屏"; return
+        }
+        mapper.suspendTouchForCursorReturn()
+        guard CGWarpMouseCursorPosition(destination) == .success else {
+            shortcutStatus.stringValue = "无法移动鼠标，请检查鼠标控制权限"; return
+        }
+        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: destination,
+                mouseButton: .left)?.post(tap: .cghidEventTap)
+        shortcutStatus.stringValue = "已返回当前主屏：\(displayName(display))"
+    }
     func refreshDisplays() {
         let saved = UserDefaults.standard.string(forKey: "displayUUID")
         displayIDs = externalDisplays()
@@ -414,12 +525,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow(); return false
     }
-    func applicationWillTerminate(_ notification: Notification) { mapper.stop() }
+    func applicationWillTerminate(_ notification: Notification) { returnShortcut.pause(); mapper.stop() }
 }
 
 func selfTest() {
+    var checks = 0
     func require(_ condition: Bool, _ label: String) {
         guard condition else { fputs("FAIL: \(label)\n", stderr); exit(1) }
+        checks += 1
     }
     let maxX = 16383, maxY = 9599
     let down: [UInt8] = [7, 1, 0xFF, 0x3F, 0x7F, 0x25, 0]
@@ -440,15 +553,38 @@ func selfTest() {
     require(mappedPoint(origin,maxX:maxX,maxY:maxY,bounds:b,rotation:270) == CGPoint(x:-2048,y:1649), "270 degree transform")
     let up = decodeMouseReport([7,0,0,0,0,0,0],reportID:7,maxX:maxX,maxY:maxY)!
     require(!up.down, "liftoff decoded")
-    print("PASS: 11 packet and coordinate checks; no device opened and no input posted")
+    let hotkey = KeyboardShortcut.defaultReturn
+    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(controlKey | optionKey)) == hotkey, "default shortcut")
+    require(KeyboardShortcut(keyCode: 4, modifiers: 0) == nil, "ordinary typing cannot be registered")
+    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(shiftKey | optionKey)) == nil, "modifier requirement")
+    require(KeyboardShortcut(keyCode: 55, modifiers: UInt32(cmdKey)) == nil, "modifier-only key rejected")
+    require(KeyboardShortcut(keyCode: 53, modifiers: UInt32(cmdKey)) == nil, "Escape remains recorder cancel")
+    require(KeyboardShortcut(keyCode: 127, modifiers: UInt32(controlKey)) == nil, "invalid key code rejected")
+    require(KeyboardShortcut(keyCode: 4, modifiers: UInt32(controlKey) | (1 << 30)) == nil, "unknown modifiers rejected")
+    let shortcutData = try! JSONEncoder().encode(hotkey)
+    require((try? JSONDecoder().decode(KeyboardShortcut.self, from: shortcutData)) == hotkey, "shortcut settings round-trip")
+    require((try? JSONDecoder().decode(KeyboardShortcut.self, from: Data("{\"keyCode\":4,\"modifiers\":0}".utf8))) == nil,
+            "invalid persisted shortcut rejected")
+    let primary = CGRect(x: 0, y: 0, width: 1470, height: 956)
+    require(primaryReturnPoint(cursor: CGPoint(x: -500, y: 200), bounds: primary) == CGPoint(x: 735, y: 478), "return from external screen")
+    require(primaryReturnPoint(cursor: CGPoint(x: 22, y: 33), bounds: primary) == nil, "already on main screen stays put")
+    require(primaryReturnPoint(cursor: CGPoint(x: 2000, y: 300), bounds: CGRect(x: -1000, y: -500, width: 800, height: 600)) == CGPoint(x: -600, y: -200), "return respects supplied main display geometry")
+    require(primaryReturnPoint(cursor: .zero, bounds: .null) == nil, "missing main screen ignored")
+    require(primaryReturnPoint(cursor: CGPoint(x: CGFloat.nan, y: 0), bounds: primary) == nil, "invalid cursor ignored")
+    print("PASS: \(checks) packet, coordinate and shortcut checks; no device opened and no input posted")
 }
 
-if CommandLine.arguments.contains("--self-test") { selfTest(); exit(0) }
-if CommandLine.arguments.contains("--list-displays") {
-    for id in externalDisplays() { print("\(uuidForDisplay(id) ?? "?") \(CGDisplayBounds(id))") }
-    exit(0)
+@main
+enum TouchHopApplication {
+    static func main() {
+        if CommandLine.arguments.contains("--self-test") { selfTest(); return }
+        if CommandLine.arguments.contains("--list-displays") {
+            for id in externalDisplays() { print("\(uuidForDisplay(id) ?? "?") \(CGDisplayBounds(id))") }
+            return
+        }
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) { application.run() }
+    }
 }
-let application = NSApplication.shared
-let delegate = AppDelegate()
-application.delegate = delegate
-application.run()

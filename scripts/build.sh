@@ -12,11 +12,11 @@ esac
 
 TOUCHHOP_APP="$TOUCHHOP_BUILD/TouchHop.app"
 mkdir -p "$TOUCHHOP_APP/Contents/MacOS" "$TOUCHHOP_APP/Contents/Resources/Licenses"
-xcrun swiftc -O -target "$TOUCHHOP_ARCH-apple-macos14.0" \
-  "$TOUCHHOP_ROOT/Sources/TouchHop.swift" \
+xcrun swiftc -O -parse-as-library -target "$TOUCHHOP_ARCH-apple-macos14.0" \
+  "$TOUCHHOP_ROOT"/Sources/*.swift \
   -o "$TOUCHHOP_APP/Contents/MacOS/TouchHop" \
   -framework AppKit -framework IOKit -framework CoreGraphics \
-  -framework ColorSync -framework ApplicationServices
+  -framework ColorSync -framework ApplicationServices -framework Carbon
 cp "$TOUCHHOP_ROOT/Resources/Info.plist" "$TOUCHHOP_APP/Contents/Info.plist"
 cp "$TOUCHHOP_ROOT/LICENSE" "$TOUCHHOP_APP/Contents/Resources/Licenses/TouchHop.LICENSE"
 cp "$TOUCHHOP_ROOT/third_party/mac-touchscreen-mapper.LICENSE" "$TOUCHHOP_APP/Contents/Resources/Licenses/"
