@@ -102,6 +102,8 @@ Settings are grouped into **触控屏幕** (touchscreen), **切屏快捷键** (s
 
 TouchHop lives in the menu bar without a Dock icon. Closing the settings window, including Command + W, keeps touch mapping, shortcuts, and position memory running. Click the TouchHop pointer icon in the menu bar to reopen settings, preview the rainbow locator, toggle features, or quit. **退出 TouchHop** quits the app and releases its devices; Command + Q also quits while its settings window is active.
 
+If the pointer icon is missing, check **System Settings → Menu Bar → Allow in the Menu Bar**. In a menu bar manager such as Frost, keep TouchHop in the **Visible** section and move it next to icons you can already see. A crowded menu bar may clip an item even when it is allowed and marked visible. Opening the TouchHop app again also reopens settings without resetting the running session.
+
 The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
 
 Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. A separate passive mouse-only observer remembers the last point per display without changing or suppressing events. Both listeners run only while their shortcut feature is enabled and require mouse-control and Input Monitoring access. No key history, typed text, or pointer trajectory is stored. Recording listens locally in the settings window.
