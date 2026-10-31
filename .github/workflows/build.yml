@@ -1,0 +1,27 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build
+        run: ./scripts/build.sh
+      - name: Run packet and coordinate checks
+        run: ./scripts/test.sh
+      - name: Package development build
+        run: ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip
+      - name: Upload development build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TouchHop-macos
+          path: build/TouchHop-macos.zip
+          if-no-files-found: error
