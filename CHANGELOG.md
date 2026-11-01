@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Add English and Japanese alongside Simplified Chinese throughout settings, menu bar actions, permission guidance, shortcut labels, status messages, and pointer-overlay accessibility text.
+- Follow macOS system and per-app language preferences, with English as the fallback.
+- Size aligned field labels for the selected language and include all three translation catalogs in app builds.
+- Add a Japanese user guide and expand checks to 87, including packaged translations and formatting compatibility.
+
 ## 0.5.1
 
 - Keep the menu item named “触控定位” and show a checkmark while touch mapping is running; clicking it toggles mapping off or on.

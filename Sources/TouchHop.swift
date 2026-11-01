@@ -62,7 +62,7 @@ func externalDisplays() -> [CGDirectDisplayID] {
 func displayName(_ id: CGDirectDisplayID) -> String {
     NSScreen.screens.first {
         ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id
-    }?.localizedName ?? "外接显示器"
+    }?.localizedName ?? L("display.external")
 }
 
 func returnCode(_ code: IOReturn) -> String { String(format: "0x%08X", UInt32(bitPattern: code)) }
@@ -103,8 +103,8 @@ final class TouchMapper {
     var reports = 0
     var events = 0
     var invalidReports = 0
-    var message = "尚未启用"
-    var lastReport = "尚未收到触控数据"
+    var message = L("touch.inactive")
+    var lastReport = L("details.no_reports")
     var activeLocation: Int?
     var isDown = false
     var lastPoint = CGPoint.zero
@@ -126,10 +126,10 @@ final class TouchMapper {
         stop()
         targetUUID = uuid
         self.rotation = rotation
-        guard targetBounds() != nil else { message = "所选外屏未连接，未接管触控"; return }
-        guard AXIsProcessTrusted() else { message = "需要允许鼠标控制权限"; return }
+        guard targetBounds() != nil else { message = L("touch.disconnected"); return }
+        guard AXIsProcessTrusted() else { message = L("touch.control_required"); return }
         guard IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else {
-            message = "需要在系统设置中允许输入监控"; return
+            message = L("touch.monitoring_required"); return
         }
         let m = IOHIDManagerCreate(kCFAllocatorDefault, 0)
         manager = m
@@ -153,16 +153,16 @@ final class TouchMapper {
         let result = IOHIDManagerOpen(m, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
         guard result == kIOReturnSuccess else {
             stop()
-            message = "无法接管触控接口（\(returnCode(result))），请检查权限或关闭其他触控驱动"
+            message = L("touch.capture_failed", returnCode(result))
             return
         }
         running = true
-        message = "触控定位已启用"
+        message = L("touch.running")
     }
 
     func connect(_ device: IOHIDDevice) {
         guard let session = PanelSession(device: device, mapper: self) else {
-            message = "设备坐标格式与已检查的外屏不符，已忽略该接口"
+            message = L("touch.unsupported")
             IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
             return
         }
@@ -178,7 +178,7 @@ final class TouchMapper {
     func receive(_ bytes: [UInt8], reportID: UInt32, session: PanelSession) {
         guard running else { return }
         reports += 1
-        lastReport = "已收到 \(reports) 份数据，最近报告编号 \(reportID)，长度 \(bytes.count)"
+        lastReport = L("details.report", reports, reportID, bytes.count)
         guard let packet = decodeMouseReport(bytes, reportID: reportID, maxX: session.maxX, maxY: session.maxY) else {
             invalidReports += 1; return
         }
@@ -189,7 +189,7 @@ final class TouchMapper {
         guard let bounds = targetBounds() else {
             releasePointer()
             suppressedLocation = packet.down ? session.location : nil
-            message = "外屏未连接，触控已暂停"
+            message = L("touch.paused_disconnected")
             return
         }
         if isDown && bounds != activeBounds {
@@ -256,7 +256,7 @@ final class TouchMapper {
         manager = nil
         sessions.removeAll()
         suppressedLocation = nil
-        message = "触控定位已停用，系统恢复原来的触控方式"
+        message = L("touch.stopped")
     }
 }
 
@@ -308,10 +308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "显示设置窗口", action: #selector(showWindow), keyEquivalent: ",").target = self
-        appMenu.addItem(withTitle: "关闭窗口", action: #selector(closeSettingsWindow), keyEquivalent: "w").target = self
+        appMenu.addItem(withTitle: L("menu.show_settings"), action: #selector(showWindow), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: L("menu.close"), action: #selector(closeSettingsWindow), keyEquivalent: "w").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出 TouchHop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         NSApp.mainMenu = mainMenu
         buildSettingsWindow()
@@ -358,13 +358,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         returnShortcut.onPress = { [weak self] in self?.cycleScreen() }
         shortcutRecorder.onBegin = { [weak self] in
             self?.returnShortcut.pause()
-            self?.shortcutStatus.stringValue = "请按单键或组合键；单独修饰键松开后确认，Esc 取消"
+            self?.shortcutStatus.stringValue = L("shortcut.record_hint")
         }
         shortcutRecorder.onCancel = { [weak self] in self?.resumeReturnShortcut() }
         shortcutRecorder.onCapture = { [weak self] candidate in
             guard let self else { return false }
             guard let candidate else {
-                self.shortcutStatus.stringValue = "此按键暂不支持，请使用普通按键或左右 Command、Control、Option、Shift、Fn"
+                self.shortcutStatus.stringValue = L("shortcut.unsupported")
                 return false
             }
             do {
@@ -372,21 +372,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.savedShortcut = candidate
                 self.shortcutRecorder.shortcut = candidate
                 defaults.set(try JSONEncoder().encode(candidate), forKey: "returnToMainShortcut")
-                self.shortcutStatus.stringValue = self.isShortcutEnabled ? "快捷键已保存：\(candidate.title)" : "快捷键已保存，当前未启用"
+                self.shortcutStatus.stringValue = self.isShortcutEnabled ? L("shortcut.saved", candidate.title) : L("shortcut.saved_disabled")
                 return true
             } catch {
-                self.shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法保存快捷键，请重试"
+                self.shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? L("shortcut.save_failed")
                 return false
             }
         }
         resumeReturnShortcut()
     }
     func resumeReturnShortcut() {
-        guard isShortcutEnabled else { shortcutStatus.stringValue = "切屏快捷键已停用"; return }
+        guard isShortcutEnabled else { shortcutStatus.stringValue = L("shortcut.disabled"); return }
         do {
             try returnShortcut.register(savedShortcut)
-            shortcutStatus.stringValue = "快捷键已启用：\(savedShortcut.title)"
-        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法注册快捷键" }
+            shortcutStatus.stringValue = L("shortcut.active", savedShortcut.title)
+        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? L("shortcut.register_failed") }
     }
     @objc func windowResignedKey() { shortcutRecorder.cancelRecording() }
     @objc func toggleReturnShortcut() {
@@ -405,13 +405,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             shortcutRecorder.shortcut = candidate
             UserDefaults.standard.set(try JSONEncoder().encode(candidate), forKey: "returnToMainShortcut")
             resumeReturnShortcut()
-        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? "无法恢复默认快捷键" }
+        } catch { shortcutStatus.stringValue = (error as? ShortcutError)?.message ?? L("shortcut.reset_failed") }
     }
     @objc func previewCursorBeacon() {
         if let point = CGEvent(source: nil)?.location { cursorBeacon.show(at: point) }
     }
     func cycleScreen() {
-        guard AXIsProcessTrusted() else { shortcutStatus.stringValue = "请先允许鼠标控制权限"; return }
+        guard AXIsProcessTrusted() else { shortcutStatus.stringValue = L("shortcut.control_required"); return }
         guard let current = CGEvent(source: nil) else { return }
         let screens = activeCycleScreens()
         let timestamp = mousePositionTimestamp()
@@ -423,11 +423,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CGEventSource.buttonState(.combinedSessionState, button: .right) ||
            CGEventSource.buttonState(.combinedSessionState, button: .center) ||
            (!mapper.isDown && CGEventSource.buttonState(.combinedSessionState, button: .left)) {
-            shortcutStatus.stringValue = "请先松开鼠标按键，再切换屏幕"; return
+            shortcutStatus.stringValue = L("shortcut.release_buttons"); return
         }
         mapper.suspendTouchForCursorReturn()
         guard CGWarpMouseCursorPosition(destination) == .success else {
-            shortcutStatus.stringValue = "无法移动鼠标，请检查鼠标控制权限"; return
+            shortcutStatus.stringValue = L("shortcut.move_failed"); return
         }
         if let moved = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                                mouseCursorPosition: destination, mouseButton: .left) {
@@ -436,7 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             screenPositions.observe(destination, screens: screens, timestamp: moved.timestamp)
         }
         cursorBeacon.show(at: destination)
-        shortcutStatus.stringValue = remembered ? "已回到上次离开的位置：\(displayName(target.id))" : "尚无位置记录，已定位中央：\(displayName(target.id))"
+        shortcutStatus.stringValue = remembered ? L("shortcut.restored", displayName(target.id)) : L("shortcut.centered", displayName(target.id))
     }
     func refreshDisplays() {
         mousePositionTracker.updateScreens(activeCycleScreens(), since: mousePositionTimestamp())
@@ -450,10 +450,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let index = displayIDs.firstIndex(where: { uuidForDisplay($0) == saved }) {
             displayPicker.selectItem(at: index)
         } else if saved != nil {
-            displayPicker.addItem(withTitle: "先前绑定的外屏未连接")
+            displayPicker.addItem(withTitle: L("display.saved_disconnected"))
             displayPicker.selectItem(at: displayIDs.count)
         }
-        if displayIDs.isEmpty { displayPicker.addItem(withTitle: "未检测到外接显示器") }
+        if displayIDs.isEmpty { displayPicker.addItem(withTitle: L("display.none")) }
     }
     @objc func displaysChanged() {
         mapper.releasePointer()
@@ -490,7 +490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         refreshStatus()
     }
     func enable() {
-        guard let uuid = selectedUUID else { mapper.message = "请先选择已连接的外屏"; return }
+        guard let uuid = selectedUUID else { mapper.message = L("touch.select_display"); return }
         mapper.start(uuid: uuid, rotation: rotationPicker.indexOfSelectedItem * 90)
         if mapper.running {
             UserDefaults.standard.set(uuid, forKey: "displayUUID")
@@ -500,21 +500,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func refreshStatus() {
         let control = AXIsProcessTrusted()
         let monitoring = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-        controlStateLabel.stringValue = control ? "已允许" : "待允许"
-        monitoringStateLabel.stringValue = monitoring ? "已允许" : "待允许"
+        controlStateLabel.stringValue = control ? L("permissions.allowed") : L("permissions.pending")
+        monitoringStateLabel.stringValue = monitoring ? L("permissions.allowed") : L("permissions.pending")
         controlStateLabel.textColor = control ? .systemGreen : .secondaryLabelColor
         monitoringStateLabel.textColor = monitoring ? .systemGreen : .secondaryLabelColor
-        controlPermissionButton.title = control ? "查看设置" : "允许控制"
-        monitoringPermissionButton.title = monitoring ? "查看设置" : "允许监控"
+        controlPermissionButton.title = control ? L("permissions.settings") : L("permissions.allow_control")
+        monitoringPermissionButton.title = monitoring ? L("permissions.settings") : L("permissions.allow_monitoring")
         if mapper.running && (!control || !monitoring) { mapper.stop() }
         if isShortcutEnabled && control && monitoring {
             if !mousePositionTracker.isRunning {
-                shortcutStatus.stringValue = mousePositionTracker.start() ? "已开始记忆各屏幕离开位置" : "位置记忆尚未启用，请检查输入监控权限"
+                shortcutStatus.stringValue = mousePositionTracker.start() ? L("shortcut.memory_ready") : L("shortcut.memory_failed")
             }
         } else { mousePositionTracker.stop() }
         if savedShortcut.isSingle && (!control || !monitoring) && returnShortcut.isRegistered {
             returnShortcut.pause()
-            shortcutStatus.stringValue = "单键快捷键等待鼠标控制和输入监控权限"
+            shortcutStatus.stringValue = L("shortcut.waiting_permissions")
         }
         if control && monitoring && isShortcutEnabled && !shortcutRecorder.recording && !returnShortcut.isRegistered {
             let now = ProcessInfo.processInfo.systemUptime
@@ -524,13 +524,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             autoStartPending = false
             enable()
         }
-        toggleButton.title = mapper.running ? "停用触控定位" : "启用触控定位"
+        toggleButton.title = mapper.running ? L("touch.disable") : L("touch.enable")
         statusLabel.stringValue = mapper.message
         let needsPermission = !control || !monitoring
-        summaryLabel.stringValue = needsPermission ? "● 待授权" : (mapper.running ? "● 运行中" : "● 触控已暂停")
+        summaryLabel.stringValue = needsPermission ? L("summary.permission") : (mapper.running ? L("summary.running") : L("summary.paused"))
         summaryLabel.textColor = needsPermission ? .systemOrange : (mapper.running ? .systemGreen : .secondaryLabelColor)
         updateStatusItem()
-        dataLabel.stringValue = "已连接触控接口：\(mapper.sessions.count) · 已发送操作：\(mapper.events)\n\(mapper.lastReport)"
+        dataLabel.stringValue = L("details.stats", mapper.sessions.count, mapper.events, mapper.lastReport)
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow(); return false
@@ -577,7 +577,7 @@ func selfTest() {
     require((try? JSONDecoder().decode(KeyboardShortcut.self, from: shortcutData)) == hotkey, "shortcut settings round-trip")
     require((try? JSONDecoder().decode(KeyboardShortcut.self, from: Data("{\"keyCode\":54,\"modifiers\":256}".utf8))) == nil,
             "invalid persisted shortcut rejected")
-    require(hotkey.title.contains("右 Command"), "side-specific shortcut label")
+    require(hotkey.title == L("key.right_command"), "side-specific shortcut label")
     require(KeyboardShortcut(keyCode: 55, modifiers: 0) != hotkey, "left and right Command differ")
     require(KeyboardShortcut(keyCode: 57, modifiers: 0) == nil, "latching Caps Lock not treated as a tap")
     require(KeyboardShortcut(keyCode: 63, modifiers: 0) != nil, "Fn key allowed")
@@ -677,7 +677,8 @@ func selfTest() {
     memory.observe(CGPoint(x: 500, y: 400), screens: pair, timestamp: 200)
     memory.observe(CGPoint(x: -600, y: 225), screens: pair, timestamp: 150)
     require(near(memory.destination(for: screenB), CGPoint(x: -600, y: 225)), "event ordering is guarded separately per display")
-    print("PASS: \(checks) packet, coordinate and shortcut checks; no device opened and no input posted")
+    checkLocalizations(require)
+    print("PASS: \(checks) input, coordinate, shortcut and localization checks; no device opened and no input posted")
 }
 
 @main

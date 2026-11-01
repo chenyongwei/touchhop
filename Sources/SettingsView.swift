@@ -52,7 +52,9 @@ extension AppDelegate {
 
     private func fieldName(_ text: String) -> NSTextField {
         let field = label(text, size: 13)
-        field.widthAnchor.constraint(equalToConstant: 66).isActive = true
+        let names = [L("settings.target"), L("settings.orientation"), L("shortcut.field"), L("highlight.field")]
+        let width = names.map { ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)]).width }.max() ?? 66
+        field.widthAnchor.constraint(equalToConstant: max(66, ceil(width) + 2)).isActive = true
         return field
     }
 
@@ -115,68 +117,68 @@ extension AppDelegate {
 
         let identity = column(spacing: 4)
         identity.addArrangedSubview(label("TouchHop", size: 25, bold: true))
-        identity.addArrangedSubview(note("触控直达，轻松切屏"))
-        summaryLabel = label("准备就绪", size: 12, bold: true)
+        identity.addArrangedSubview(note(L("app.tagline")))
+        summaryLabel = label(L("app.ready"), size: 12, bold: true)
         summaryLabel.setContentHuggingPriority(.required, for: .horizontal)
         fill(row([symbol("cursorarrow.motionlines", description: "TouchHop", size: 30), identity, spacer(), summaryLabel]), in: stack)
         stack.setCustomSpacing(20, after: stack.arrangedSubviews.last!)
 
-        toggleButton = button("启用触控定位", action: #selector(toggle))
+        toggleButton = button(L("touch.enable"), action: #selector(toggle))
         toggleButton.bezelStyle = .rounded
-        fill(card(title: "触控屏幕", icon: "display", accessory: toggleButton) { body in
+        fill(card(title: L("settings.touch"), icon: "display", accessory: toggleButton) { body in
             displayPicker = NSPopUpButton()
             displayPicker.target = self
             displayPicker.action = #selector(changeDisplay)
             displayPicker.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            fill(row([fieldName("目标屏幕"), displayPicker]), in: body)
+            fill(row([fieldName(L("settings.target")), displayPicker]), in: body)
             rotationPicker = NSPopUpButton()
-            rotationPicker.addItems(withTitles: ["正常 · 0°", "顺时针 · 90°", "旋转 · 180°", "逆时针 · 90°"])
+            rotationPicker.addItems(withTitles: [L("rotation.0"), L("rotation.90"), L("rotation.180"), L("rotation.270")])
             rotationPicker.target = self
             rotationPicker.action = #selector(changeRotation)
             rotationPicker.selectItem(at: UserDefaults.standard.integer(forKey: "rotation") / 90)
-            fill(row([fieldName("触控方向"), rotationPicker, spacer()]), in: body)
-            statusLabel = note("尚未启用")
+            fill(row([fieldName(L("settings.orientation")), rotationPicker, spacer()]), in: body)
+            statusLabel = note(L("touch.inactive"))
             fill(statusLabel, in: body)
         }, in: stack)
 
-        shortcutEnabled = NSButton(checkboxWithTitle: "启用", target: self, action: #selector(toggleReturnShortcut))
-        shortcutEnabled.setAccessibilityLabel("启用切屏快捷键")
-        fill(card(title: "切屏快捷键", icon: "keyboard", accessory: shortcutEnabled) { body in
+        shortcutEnabled = NSButton(checkboxWithTitle: L("common.enabled"), target: self, action: #selector(toggleReturnShortcut))
+        shortcutEnabled.setAccessibilityLabel(L("shortcut.enable"))
+        fill(card(title: L("shortcut.section"), icon: "keyboard", accessory: shortcutEnabled) { body in
             shortcutRecorder = ShortcutRecorderButton()
             shortcutRecorder.bezelStyle = .rounded
-            fill(row([fieldName("快捷键"), shortcutRecorder, spacer(), button("恢复默认", action: #selector(resetReturnShortcut))]), in: body)
-            fill(note("切回每块屏幕上次离开的位置；首次到达时定位中央。"), in: body)
-            fill(row([fieldName("指针提示"), label("炫彩光环与放大指针", size: 13), spacer(),
-                      button("预览效果", action: #selector(previewCursorBeacon))]), in: body)
-            let hint = note("支持单键或组合键，Esc 取消录入。字母或空格单键会占用该键的普通输入。")
+            fill(row([fieldName(L("shortcut.field")), shortcutRecorder, spacer(), button(L("shortcut.reset"), action: #selector(resetReturnShortcut))]), in: body)
+            fill(note(L("shortcut.restore_hint")), in: body)
+            fill(row([fieldName(L("highlight.field")), label(L("highlight.style"), size: 13), spacer(),
+                      button(L("highlight.preview"), action: #selector(previewCursorBeacon))]), in: body)
+            let hint = note(L("shortcut.hint"))
             fill(hint, in: body)
             shortcutStatus = note("")
             fill(shortcutStatus, in: body)
         }, in: stack)
 
-        fill(card(title: "权限与状态", icon: "checkmark.shield") { body in
-            controlStateLabel = label("待允许", size: 12)
-            monitoringStateLabel = label("待允许", size: 12)
-            controlPermissionButton = button("允许控制", action: #selector(requestControl))
-            monitoringPermissionButton = button("允许监控", action: #selector(openMonitoring))
-            fill(row([label("鼠标控制", size: 13), spacer(), controlStateLabel, controlPermissionButton]), in: body)
-            fill(row([label("输入监控", size: 13), spacer(), monitoringStateLabel, monitoringPermissionButton]), in: body)
-            detailsButton = button("查看连接详情", action: #selector(toggleConnectionDetails))
+        fill(card(title: L("permissions.section"), icon: "checkmark.shield") { body in
+            controlStateLabel = label(L("permissions.pending"), size: 12)
+            monitoringStateLabel = label(L("permissions.pending"), size: 12)
+            controlPermissionButton = button(L("permissions.allow_control"), action: #selector(requestControl))
+            monitoringPermissionButton = button(L("permissions.allow_monitoring"), action: #selector(openMonitoring))
+            fill(row([label(L("permissions.control"), size: 13), spacer(), controlStateLabel, controlPermissionButton]), in: body)
+            fill(row([label(L("permissions.monitoring"), size: 13), spacer(), monitoringStateLabel, monitoringPermissionButton]), in: body)
+            detailsButton = button(L("details.show"), action: #selector(toggleConnectionDetails))
             detailsButton.bezelStyle = .inline
             body.addArrangedSubview(detailsButton)
-            dataLabel = note("尚未收到触控数据")
+            dataLabel = note(L("details.no_reports"))
             dataLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             dataLabel.isHidden = true
             fill(dataLabel, in: body)
         }, in: stack)
 
-        fill(row([symbol("menubar.rectangle", description: "菜单栏", size: 14),
-                  note("关闭窗口后继续在菜单栏运行。")], spacing: 7), in: stack)
+        fill(row([symbol("menubar.rectangle", description: L("footer.menu_bar"), size: 14),
+                  note(L("footer.background"))], spacing: 7), in: stack)
         window.center()
     }
 
     @objc func toggleConnectionDetails() {
         dataLabel.isHidden.toggle()
-        detailsButton.title = dataLabel.isHidden ? "查看连接详情" : "收起连接详情"
+        detailsButton.title = dataLabel.isHidden ? L("details.show") : L("details.hide")
     }
 }

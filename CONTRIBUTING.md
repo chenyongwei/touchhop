@@ -14,3 +14,7 @@ Do not broaden the filter to all mice or digitizers. Built-in pointing devices a
 For hardware validation, check touch from another display, the target's corners and center, dragging, disconnect/reconnect, and app restart. Describe what was actually tested and keep unverified compatibility explicit.
 
 The automated self-test must remain free of HID access, permission prompts, and synthetic input. Ordinary software changes do not require a physical touchscreen to run the self-test.
+
+## Translations
+
+UI text is stored in `Resources/en.lproj`, `Resources/zh-Hans.lproj`, and `Resources/ja.lproj`. Use stable keys through `L(...)` in Swift and update every catalog when adding a key. Preserve format-argument types and order. The self-test checks packaged catalog keys, empty translations, and placeholder compatibility. Check each affected language in the actual settings window and menu; translated text can need more horizontal space.

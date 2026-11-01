@@ -108,9 +108,9 @@ struct KeyboardShortcut: Codable, Equatable {
 
 private func keyLabel(_ code: UInt32) -> String {
     let names: [UInt32: String] = [
-        54: "右 Command ⌘", 55: "左 Command ⌘", 56: "左 Shift ⇧", 60: "右 Shift ⇧",
-        58: "左 Option ⌥", 61: "右 Option ⌥", 59: "左 Control ⌃", 62: "右 Control ⌃", 63: "Fn / 🌐",
-        36: "↩", 48: "⇥", 49: "空格", 51: "⌫", 76: "⌤", 117: "⌦",
+        54: L("key.right_command"), 55: L("key.left_command"), 56: L("key.left_shift"), 60: L("key.right_shift"),
+        58: L("key.left_option"), 61: L("key.right_option"), 59: L("key.left_control"), 62: L("key.right_control"), 63: "Fn / 🌐",
+        36: "↩", 48: "⇥", 49: L("key.space"), 51: "⌫", 76: "⌤", 117: "⌦",
         115: "↖", 119: "↘", 116: "⇞", 121: "⇟", 123: "←", 124: "→", 125: "↓", 126: "↑",
         122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7",
         100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12", 105: "F13",
@@ -119,10 +119,10 @@ private func keyLabel(_ code: UInt32) -> String {
     if let name = names[code] { return name }
     let source = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
     guard let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
-        return "按键 \(code)"
+        return L("key.unknown", code)
     }
     let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue()
-    guard let bytes = CFDataGetBytePtr(data) else { return "按键 \(code)" }
+    guard let bytes = CFDataGetBytePtr(data) else { return L("key.unknown", code) }
     let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
     var deadState: UInt32 = 0
     var characters = [UniChar](repeating: 0, count: 8)
@@ -130,7 +130,7 @@ private func keyLabel(_ code: UInt32) -> String {
     let result = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDisplay), 0,
         UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysMask),
         &deadState, characters.count, &count, &characters)
-    guard result == noErr, count > 0 else { return "按键 \(code)" }
+    guard result == noErr, count > 0 else { return L("key.unknown", code) }
     return String(utf16CodeUnits: characters, count: count).uppercased()
 }
 
@@ -141,10 +141,10 @@ enum ShortcutError: Error {
 
     var message: String {
         switch self {
-        case .inputAccess: return "单键快捷键需要鼠标控制和输入监控权限，请先允许权限"
-        case .systemConflict: return "此组合键已用于系统快捷键，请换一个"
+        case .inputAccess: return L("shortcut.input_required")
+        case .systemConflict: return L("shortcut.system_conflict")
         case .registration(let code):
-            return "此组合键无法注册或已被占用（\(code)），请换一个"
+            return L("shortcut.registration_error", code)
         }
     }
 }
@@ -369,7 +369,7 @@ final class ShortcutRecorderButton: NSButton {
         cancelRecording()
         return super.resignFirstResponder()
     }
-    private func updateTitle() { title = recording ? "请按单键或组合键…（Esc 取消）" : "\(shortcut.title) · 点击更改" }
+    private func updateTitle() { title = recording ? L("shortcut.recording") : L("shortcut.recorder_title", shortcut.title) }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }
 

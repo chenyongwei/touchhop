@@ -2,7 +2,7 @@
 
 **Touch your screen. Your cursor follows.**
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
 TouchHop is a small native macOS app that maps an external touchscreen's absolute mouse input to the display you select. Touching that display moves the cursor to your finger and sends the corresponding mouse action, even when the cursor started on the Mac's built-in screen.
 
@@ -21,7 +21,7 @@ This initial version targets one observed USB controller and report format. **It
 
 On that setup, touching the external screen from the built-in screen was confirmed to move the pointer to the correct position, including checks near the corners and center. App restart also restored the saved binding and enabled state. Other controllers, Intel hardware, and other macOS versions remain unverified.
 
-The app reads the device's declared coordinate limits instead of assuming the tested screen's resolution. The current settings UI is in Simplified Chinese.
+The app reads the device's declared coordinate limits instead of assuming the tested screen's resolution. The settings UI, menu bar, permission guidance, shortcut names, and status messages support English, Simplified Chinese, and Japanese.
 
 ## Features
 
@@ -69,12 +69,12 @@ ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip
 1. Quit any other touch-mapping app using the same panel.
 2. Copy `build/TouchHop.app` to Applications, then open it.
 3. Select the target external display.
-4. In **权限与状态**, use **允许控制** to grant Accessibility / mouse-control access. macOS may label this panel **Device Control and Data Access**. Complete any system authentication yourself.
-5. Use **允许监控** to request Input Monitoring. If macOS asks you to restart the app, do so.
-6. Click **启用触控定位** to enable mapping. Place the cursor on the built-in display, then touch an empty area on the external screen to check alignment.
+4. In **Permissions & Status**, use **Allow Control** to grant Accessibility / mouse-control access. macOS may label this panel **Device Control and Data Access**. Complete any system authentication yourself.
+5. Use **Allow Monitoring** to request Input Monitoring. If macOS asks you to restart the app, do so.
+6. Mapping enables by default once the required permissions and selected display are available. If you previously disabled it, click **Enable Touch Mapping**. Place the cursor on the built-in display, then touch an empty area on the external screen to check alignment.
 7. If necessary, change the rotation setting and check the corners and center again.
 
-**停用触控定位** disables mapping. Quitting the app also releases the interfaces and any mouse button it is holding. Closing its settings window leaves mapping running; reopening TouchHop brings the settings back.
+**Disable Touch Mapping** disables mapping. Quitting the app also releases the interfaces and any mouse button it is holding. Closing its settings window leaves mapping running; reopening TouchHop brings the settings back.
 
 For login startup, add TouchHop in **System Settings → General → Login Items**. An enabled installation resumes after launch when the saved target display and the required permissions are available.
 
@@ -86,23 +86,27 @@ The default shortcut is **right Command**, pressed and released on its own. With
 
 Positions are tracked during ordinary mouse movement and touchscreen jumps, so touching the external screen also preserves the departure position on the built-in screen. Each physical display has one position in memory, cleared when TouchHop quits. Display identity and relative coordinates let the position follow screen rearrangement, resolution changes, and reconnection; the restored point stays within the destination screen.
 
-In the **快捷键切换屏幕** section:
+In the **Screen-switch Shortcut** section:
 
 - Click the displayed key to record a single ordinary key, a left/right modifier key, or a combination. Release a standalone modifier to finish recording it; Escape cancels. Caps Lock and Escape are not assignable.
-- **恢复默认** restores right Command; **启用切屏快捷键** enables or disables this feature independently of touch mapping.
+- **Reset to Default** restores right Command; **Enabled** enables or disables this feature independently of touch mapping.
 - Right and left Command are distinct single keys. A modifier triggers only after a solo press/release. Using it with another key, a click, drag, or scroll cancels the screen switch, so ordinary Command combinations keep their normal behavior.
 - An ordinary single key is consumed as a shortcut while enabled; assigning a letter or Space replaces its unmodified typing behavior. Modified uses of that key remain available.
 - The shortcut and enabled state persist across restarts. On the first upgrade from 0.2, the former default `⌃⌥H` migrates to right Command. Other custom bindings are retained.
 
-Each switch shows a roughly one-second enlarged pointer with an animated rainbow ring. Opaque black and white rims keep the ring distinct on light, dark, and similarly colored backgrounds. This is a click-through overlay that follows the cursor and fades automatically; it does not permanently change macOS pointer-size preferences. **预览效果** previews it without moving the cursor. With macOS Reduce Motion enabled, the rainbow remains static while the overlay still fades away.
+Each switch shows a roughly one-second enlarged pointer with an animated rainbow ring. Opaque black and white rims keep the ring distinct on light, dark, and similarly colored backgrounds. This is a click-through overlay that follows the cursor and fades automatically; it does not permanently change macOS pointer-size preferences. **Preview** previews it without moving the cursor. With macOS Reduce Motion enabled, the rainbow remains static while the overlay still fades away.
+
+## Interface language
+
+One app includes English, Simplified Chinese, and Japanese. It follows the macOS language preference, including a language selected specifically for TouchHop in **System Settings → General → Language & Region**. Quit and reopen TouchHop after changing its language. English is the fallback for unsupported languages. Changing the interface language preserves the display binding, rotation, shortcut, and enabled preferences.
 
 ## Settings and menu bar
 
-Settings are grouped into **触控屏幕** (touchscreen), **切屏快捷键** (screen-switch shortcut), and **权限与状态** (permissions and status). Connection counters are available under **查看连接详情**, and the window can scroll at smaller sizes.
+Settings are grouped into **Touchscreen**, **Screen-switch Shortcut**, and **Permissions & Status**. Connection counters are available under **Show Connection Details**, and the window can scroll at smaller sizes.
 
-TouchHop lives in the menu bar without a Dock icon. Closing the settings window, including Command + W, keeps touch mapping, shortcuts, and position memory running. Click the TouchHop pointer icon in the menu bar to reopen settings, preview the rainbow locator, toggle features, or quit. **退出 TouchHop** quits the app and releases its devices; Command + Q also quits while its settings window is active.
+TouchHop lives in the menu bar without a Dock icon. Closing the settings window, including Command + W, keeps touch mapping, shortcuts, and position memory running. Click the TouchHop pointer icon in the menu bar to reopen settings, preview the rainbow locator, toggle features, or quit. **Quit TouchHop** quits the app and releases its devices; Command + Q also quits while its settings window is active.
 
-The **触控定位** menu item is checked while touch mapping is running. Click it to disable mapping and clear the checkmark; click again to enable it. Mapping defaults to enabled once the required permissions and display are available, and a manually disabled state is saved across restarts.
+The **Touch Mapping** menu item is checked while touch mapping is running. Click it to disable mapping and clear the checkmark; click again to enable it. Mapping defaults to enabled once the required permissions and display are available, and a manually disabled state is saved across restarts.
 
 If the pointer icon is missing, check **System Settings → Menu Bar → Allow in the Menu Bar**. In a menu bar manager such as Frost, keep TouchHop in the **Visible** section and move it next to icons you can already see. A crowded menu bar may clip an item even when it is allowed and marked visible. Opening the TouchHop app again also reopens settings without resetting the running session.
 
@@ -118,7 +122,7 @@ If the selected display is unavailable, touch is not redirected to the built-in 
 
 ## Validation
 
-`./scripts/test.sh` runs 71 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, per-display position memory, layout/resolution changes, stale-event rejection, and pointer-overlay geometry. These checks do not open a HID device, install event taps, register a global shortcut, request permissions, or post input.
+`./scripts/test.sh` runs 87 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, per-display position memory, layout/resolution changes, stale-event rejection, pointer-overlay geometry, and bundled localization completeness and format arguments. These checks do not open a HID device, install event taps, register a global shortcut, request permissions, or post input.
 
 The GitHub Actions workflow builds the app, runs these checks, and uploads a development ZIP. CI does not test physical touch hardware, permissions, or actual login startup.
 

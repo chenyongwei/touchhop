@@ -18,6 +18,10 @@ xcrun swiftc -O -parse-as-library -target "$TOUCHHOP_ARCH-apple-macos14.0" \
   -framework AppKit -framework IOKit -framework CoreGraphics \
   -framework ColorSync -framework ApplicationServices -framework Carbon
 cp "$TOUCHHOP_ROOT/Resources/Info.plist" "$TOUCHHOP_APP/Contents/Info.plist"
+for TOUCHHOP_LOCALIZATION in "$TOUCHHOP_ROOT"/Resources/*.lproj; do
+  ditto "$TOUCHHOP_LOCALIZATION" "$TOUCHHOP_APP/Contents/Resources/$(basename "$TOUCHHOP_LOCALIZATION")"
+  plutil -lint "$TOUCHHOP_LOCALIZATION/Localizable.strings"
+done
 cp "$TOUCHHOP_ROOT/LICENSE" "$TOUCHHOP_APP/Contents/Resources/Licenses/TouchHop.LICENSE"
 cp "$TOUCHHOP_ROOT/third_party/mac-touchscreen-mapper.LICENSE" "$TOUCHHOP_APP/Contents/Resources/Licenses/"
 cp "$TOUCHHOP_ROOT/THIRD_PARTY_NOTICES.md" "$TOUCHHOP_APP/Contents/Resources/Licenses/"

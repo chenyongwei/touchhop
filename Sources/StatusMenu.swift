@@ -11,7 +11,7 @@ extension AppDelegate {
                 image.isTemplate = true
                 button.image = image
             } else { button.title = "TH" }
-            button.setAccessibilityLabel("TouchHop 菜单栏")
+            button.setAccessibilityLabel(L("menu.accessibility"))
             button.toolTip = "TouchHop"
         }
         let menu = NSMenu()
@@ -23,13 +23,13 @@ extension AppDelegate {
             item.target = self
             return item
         }
-        _ = add("打开设置…", #selector(showWindow), key: ",")
-        _ = add("预览炫彩高亮", #selector(previewCursorBeacon))
+        _ = add(L("menu.settings"), #selector(showWindow), key: ",")
+        _ = add(L("menu.preview"), #selector(previewCursorBeacon))
         menu.addItem(.separator())
-        menuTouchToggle = add("触控定位", #selector(toggle))
-        menuShortcutToggle = add("切屏快捷键", #selector(toggleShortcutFromMenu))
+        menuTouchToggle = add(L("menu.touch"), #selector(toggle))
+        menuShortcutToggle = add(L("menu.shortcut"), #selector(toggleShortcutFromMenu))
         menu.addItem(.separator())
-        let quit = menu.addItem(withTitle: "退出 TouchHop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = menu.addItem(withTitle: L("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = NSApp
         statusItem.menu = menu
     }

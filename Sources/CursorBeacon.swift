@@ -66,7 +66,7 @@ final class CursorBeacon {
         view.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let panel = NSPanel(contentRect: view.bounds, styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        panel.title = "TouchHop 指针放大提示"
+        panel.title = L("highlight.window")
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
