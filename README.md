@@ -114,7 +114,7 @@ While dragging a window by its title bar with a mouse or trackpad, keep holding 
 
 If a touchscreen drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
 
-Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. A separate passive mouse-only observer remembers the last point per display without changing or suppressing events. Both listeners run only while their shortcut feature is enabled and require mouse-control and Input Monitoring access. No key history, typed text, or pointer trajectory is stored. Recording listens locally in the settings window.
+Combinations use Carbon's registered-hotkey API. Standalone modifiers use a passive HID event tap to recognize a press and release before session routing, with a session fallback when HID observation is unavailable. Ordinary single keys use a session event tap. A separate passive mouse-only observer remembers the last point per display without changing or suppressing events. Both listeners run only while their shortcut feature is enabled and require mouse-control and Input Monitoring access. No key history, typed text, or pointer trajectory is stored. Recording listens locally in the settings window.
 
 ## How it works
 

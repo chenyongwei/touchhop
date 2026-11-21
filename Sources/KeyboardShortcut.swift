@@ -219,13 +219,22 @@ final class GlobalShortcut {
         let types: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .leftMouseUp, .rightMouseDown,
                                    .otherMouseDown, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1) << $1.rawValue }
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-            eventsOfInterest: mask, callback: { _, type, event, context in
-                guard let context else { return Unmanaged.passUnretained(event) }
-                let owner = Unmanaged<GlobalShortcut>.fromOpaque(context).takeUnretainedValue()
-                return owner.handleSingle(type: type, event: event)
-            }, userInfo: Unmanaged.passUnretained(self).toOpaque()),
-            let source = CFMachPortCreateRunLoopSource(nil, tap, 0) else { throw ShortcutError.inputAccess }
+        let callback: CGEventTapCallBack = { _, type, event, context in
+            guard let context else { return Unmanaged.passUnretained(event) }
+            let owner = Unmanaged<GlobalShortcut>.fromOpaque(context).takeUnretainedValue()
+            return owner.handleSingle(type: type, event: event)
+        }
+        func makeTap(at location: CGEventTapLocation) -> CFMachPort? {
+            CGEvent.tapCreate(tap: location, place: .headInsertEventTap,
+                              options: candidate.isModifier ? .listenOnly : .defaultTap,
+                              eventsOfInterest: mask, callback: callback,
+                              userInfo: Unmanaged.passUnretained(self).toOpaque())
+        }
+        // A modifier transition can reach HID but disappear before the session tap.
+        // Observe it before routing. Ordinary single keys still require session-level consumption.
+        let hidTap = candidate.isModifier ? makeTap(at: .cghidEventTap) : nil
+        guard let tap = hidTap ?? makeTap(at: .cgSessionEventTap),
+              let source = CFMachPortCreateRunLoopSource(nil, tap, 0) else { throw ShortcutError.inputAccess }
         pause()
         shortcut = candidate
         modifierTap = ModifierTapRecognizer(keyCode: candidate.keyCode)

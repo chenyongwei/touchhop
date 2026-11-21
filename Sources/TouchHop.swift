@@ -125,7 +125,16 @@ final class TouchMapper {
     var lastClickTime: TimeInterval = 0
     var lastClickPoint = CGPoint(x: -100000, y: -100000)
     var clickCount: Int64 = 1
-    let eventSource = CGEventSource(stateID: .hidSystemState)
+    let eventSource: CGEventSource? = {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return nil }
+        // Keep physical key transitions visible while posting touchscreen mouse input.
+        // Preserve the system policy for competing mouse and tablet events.
+        for state in [CGEventSuppressionState.eventSuppressionStateSuppressionInterval, .eventSuppressionStateRemoteMouseDrag] {
+            let filter = source.getLocalEventsFilterDuringSuppressionState(state)
+            source.setLocalEventsFilterDuringSuppressionState(filter.union(.permitLocalKeyboardEvents), state: state)
+        }
+        return source
+    }()
     var onTouchStart: (() -> Void)?
 
     func targetBounds() -> CGRect? {
@@ -464,7 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard CGWarpMouseCursorPosition(destination) == .success else {
             shortcutStatus.stringValue = L("shortcut.move_failed"); return
         }
-        if let moved = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+        if let moved = CGEvent(mouseEventSource: mapper.eventSource, mouseType: .mouseMoved,
                                mouseCursorPosition: destination, mouseButton: .left) {
             moved.timestamp = mousePositionTimestamp()
             moved.post(tap: .cghidEventTap)
@@ -605,6 +614,12 @@ func selfTest() {
     require(ExternalPanel.automaticTarget(in: [monitor]) == nil, "wait after unplugging touch display")
     require(ExternalPanel.automaticTarget(in: [reconnected, monitor]) == reconnected.uuid, "reconnect on another port")
     require(ExternalPanel.automaticTarget(in: [touch, reconnected]) == nil, "ambiguous panel models require selection")
+    let touchSource = TouchMapper().eventSource
+    let keyboard = CGEventFilterMask.permitLocalKeyboardEvents
+    require(touchSource?.getLocalEventsFilterDuringSuppressionState(.eventSuppressionStateSuppressionInterval)
+        .contains(keyboard) == true, "physical shortcut remains available immediately after touch")
+    require(touchSource?.getLocalEventsFilterDuringSuppressionState(.eventSuppressionStateRemoteMouseDrag)
+        .contains(keyboard) == true, "physical shortcut remains available during a touch drag")
     let maxX = 16383, maxY = 9599
     let down: [UInt8] = [7, 1, 0xFF, 0x3F, 0x7F, 0x25, 0]
     let p = decodeMouseReport(down, reportID: 7, maxX: maxX, maxY: maxY)!
@@ -661,6 +676,11 @@ func selfTest() {
     require(cursorBeaconOrigin(cursor: CGPoint(x: -1024, y: 285), mainHeight: 956, panelSize: 180) == CGPoint(x: -1114, y: 581), "beacon external coordinates")
     require(cursorBeaconOrigin(cursor: mainScreen.center, mainHeight: 956, panelSize: 180) == CGPoint(x: 645, y: 388), "beacon main coordinates")
 
+    var physicalCommand = ModifierTapRecognizer(keyCode: 54)
+    require(!physicalCommand.flagsChanged(key: 54, flags: CGEventFlags(rawValue: 0x100110)),
+            "physical right Command press after touchscreen release")
+    require(physicalCommand.flagsChanged(key: 54, flags: CGEventFlags(rawValue: 0x100)),
+            "physical right Command release with non-coalesced event flag")
     let rightDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x10)
     let leftDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x08)
     let bothDown = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x18)
