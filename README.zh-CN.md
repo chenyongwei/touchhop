@@ -35,7 +35,7 @@ cd touchhop
 
 生成的应用位于 `build/TouchHop.app`。脚本默认构建当前电脑的架构，可通过 `TOUCHHOP_ARCH` 指定 `arm64` 或 `x86_64`。交叉编译通过不代表对应硬件已验证。
 
-生成的应用使用临时本地签名，未经 Apple 公证。构建过程不会安装应用或更改系统权限。
+要让本机升级沿用授权，请将钥匙串中代码签名证书的 40 位 SHA-1 指纹保存为单行文本文件 `~/Library/Application Support/TouchHop/signing-identity`。重新构建时会自动使用这张证书。也可以通过 `TOUCHHOP_SIGN_IDENTITY` 显式指定签名身份。未配置身份时使用临时签名。本地构建未经 Apple 公证。构建过程不会安装应用或更改系统权限。
 
 ## 使用
 

@@ -56,7 +56,7 @@ cd touchhop
 
 The output is `build/TouchHop.app`. The build script uses the host architecture (`arm64` or `x86_64`) and a macOS 14.0 deployment target. You can override the architecture with `TOUCHHOP_ARCH`; cross-compilation does not validate that architecture on hardware.
 
-The app is ad-hoc signed for local development. Builds are not Apple-notarized. The build script does not install the app or change system permissions.
+To keep the same signing identity across local upgrades, save the 40-digit SHA-1 fingerprint of your Keychain code-signing certificate on one line in `~/Library/Application Support/TouchHop/signing-identity`. The build script reads it on each build. `TOUCHHOP_SIGN_IDENTITY` overrides this setting. Unconfigured builds use ad-hoc signing. Local builds are not Apple-notarized. The build script does not install the app or change system permissions.
 
 To make a distributable development archive:
 
