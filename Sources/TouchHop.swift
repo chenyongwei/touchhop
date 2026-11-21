@@ -271,6 +271,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var controlPermissionButton: NSButton!
     var monitoringPermissionButton: NSButton!
     var detailsButton: NSButton!
+    var loginItemCheckbox: NSButton!
+    var loginItemStatus: NSTextField!
+    var loginItemSettingsButton: NSButton!
+    var loginItemError: String?
     var statusItem: NSStatusItem!
     var menuStatus: NSMenuItem!
     var menuTouchToggle: NSMenuItem!
@@ -322,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mapper.onTouchStart = { [weak self] in self?.mousePositionTracker.captureCurrentPosition() }
         refreshDisplays()
         configureReturnShortcut()
+        configureLoginItem()
         showWindow()
         timer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in self?.refreshStatus() }
         NotificationCenter.default.addObserver(self, selector: #selector(displaysChanged),
@@ -336,6 +341,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func showWindow() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if loginItemCheckbox != nil { refreshLoginItem() }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         shortcutRecorder.cancelRecording()
@@ -355,7 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         isShortcutEnabled = defaults.object(forKey: "returnToMainShortcutEnabled") as? Bool ?? true
         shortcutEnabled.state = isShortcutEnabled ? .on : .off
         shortcutRecorder.shortcut = savedShortcut
-        returnShortcut.onPress = { [weak self] in self?.cycleScreen() }
+        returnShortcut.onPress = { [weak self] duringLeftPress in self?.cycleScreen(duringLeftPress: duringLeftPress) }
         shortcutRecorder.onBegin = { [weak self] in
             self?.returnShortcut.pause()
             self?.shortcutStatus.stringValue = L("shortcut.record_hint")
@@ -410,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func previewCursorBeacon() {
         if let point = CGEvent(source: nil)?.location { cursorBeacon.show(at: point) }
     }
-    func cycleScreen() {
+    func cycleScreen(duringLeftPress: Bool) {
         guard AXIsProcessTrusted() else { shortcutStatus.stringValue = L("shortcut.control_required"); return }
         guard let current = CGEvent(source: nil) else { return }
         let screens = activeCycleScreens()
@@ -421,9 +429,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               let destination = screenPositions.destination(for: target) else { return }
         let remembered = screenPositions.hasPosition(for: target)
         if CGEventSource.buttonState(.combinedSessionState, button: .right) ||
-           CGEventSource.buttonState(.combinedSessionState, button: .center) ||
-           (!mapper.isDown && CGEventSource.buttonState(.combinedSessionState, button: .left)) {
+           CGEventSource.buttonState(.combinedSessionState, button: .center) {
             shortcutStatus.stringValue = L("shortcut.release_buttons"); return
+        }
+        let leftDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
+        guard duringLeftPress == leftDown else { return }
+        if leftDown && !mapper.isDown {
+            guard !target.bounds.contains(current.location),
+                  let landing = mousePositionTracker.windowDrag.destination(near: destination, on: target) else {
+                shortcutStatus.stringValue = L("shortcut.release_buttons"); return
+            }
+            guard CGEventSource.buttonState(.combinedSessionState, button: .left) else { return }
+            guard let timestamp = mousePositionTracker.windowDrag.postDrag(to: landing) else {
+                shortcutStatus.stringValue = L("shortcut.move_failed"); return
+            }
+            screenPositions.observe(landing, screens: screens, timestamp: timestamp)
+            cursorBeacon.show(at: landing)
+            shortcutStatus.stringValue = L("shortcut.window_moved", displayName(target.id))
+            return
         }
         mapper.suspendTouchForCursorReturn()
         guard CGWarpMouseCursorPosition(destination) == .success else {
@@ -457,6 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func displaysChanged() {
         mapper.releasePointer()
+        mousePositionTracker.windowDrag.reset()
         refreshDisplays()
         refreshStatus()
     }
@@ -634,6 +658,35 @@ func selfTest() {
     var fnTap = ModifierTapRecognizer(keyCode: 63)
     _ = fnTap.flagsChanged(key: 63, flags: .maskSecondaryFn)
     require(fnTap.flagsChanged(key: 63, flags: []), "Fn single key")
+    _ = tap.flagsChanged(key: 54, flags: rightDown, leftButtonHeld: true)
+    tap.mouseEvent(.leftMouseDragged)
+    require(tap.flagsChanged(key: 54, flags: []), "modifier tap survives motion in an existing left drag")
+    _ = tap.flagsChanged(key: 54, flags: rightDown, leftButtonHeld: true)
+    tap.mouseEvent(.leftMouseUp)
+    require(!tap.flagsChanged(key: 54, flags: []), "ending the drag cancels its pending modifier tap")
+    _ = tap.flagsChanged(key: 54, flags: rightDown)
+    tap.mouseEvent(.leftMouseDown)
+    tap.mouseEvent(.leftMouseDragged)
+    require(!tap.flagsChanged(key: 54, flags: []), "pressing the modifier before the drag remains a mouse chord")
+
+    let grabbedWindow = CGRect(x: 100, y: 120, width: 400, height: 300)
+    let grabbedAt = CGPoint(x: 240, y: 134)
+    let draggedTo = CGPoint(x: 265, y: 174)
+    require(followsWindowDrag(start: grabbedWindow, current: grabbedWindow.offsetBy(dx: 25, dy: 40),
+                              from: grabbedAt, to: draggedTo), "window translation follows the grabbed point")
+    require(!followsWindowDrag(start: grabbedWindow, current: grabbedWindow,
+                               from: grabbedAt, to: draggedTo), "content dragging leaves window bounds unchanged")
+    require(!followsWindowDrag(start: grabbedWindow, current: grabbedWindow.insetBy(dx: -25, dy: -40),
+                               from: grabbedAt, to: draggedTo), "window resizing is excluded")
+    let workArea = CGRect(x: -1200, y: -500, width: 900, height: 600)
+    require(windowDragDestination(CGPoint(x: -730, y: -410), cursor: grabbedAt, window: grabbedWindow, visible: workArea)
+            == CGPoint(x: -730, y: -410), "window uses the remembered point when it fits")
+    require(windowDragDestination(CGPoint(x: -320, y: 90), cursor: grabbedAt, window: grabbedWindow, visible: workArea)
+            == CGPoint(x: -560, y: -186), "window fits at the bottom and right while keeping its grab point")
+    let oversized = CGRect(x: 0, y: 0, width: 1800, height: 1400)
+    require(workArea.contains(windowDragDestination(.zero, cursor: CGPoint(x: 1650, y: 12),
+                                                    window: oversized, visible: workArea)),
+            "oversized window retains its grab point on the target display")
 
     let screenA = ScreenDestination(id: 41, bounds: CGRect(x: 0, y: 0, width: 1000, height: 800), identity: "panel-A")
     let screenB = ScreenDestination(id: 42, bounds: CGRect(x: -1200, y: 0, width: 1200, height: 900), identity: "panel-B")

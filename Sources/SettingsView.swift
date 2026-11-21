@@ -152,6 +152,7 @@ extension AppDelegate {
                       button(L("highlight.preview"), action: #selector(previewCursorBeacon))]), in: body)
             let hint = note(L("shortcut.hint"))
             fill(hint, in: body)
+            fill(note(L("shortcut.drag_hint")), in: body)
             shortcutStatus = note("")
             fill(shortcutStatus, in: body)
         }, in: stack)
@@ -171,6 +172,13 @@ extension AppDelegate {
             dataLabel.isHidden = true
             fill(dataLabel, in: body)
         }, in: stack)
+
+        loginItemCheckbox = NSButton(checkboxWithTitle: L("login_item.checkbox"), target: self,
+                                     action: #selector(toggleLoginItem))
+        loginItemSettingsButton = button(L("login_item.settings"), action: #selector(openLoginItemSettings))
+        loginItemStatus = note("")
+        fill(row([loginItemCheckbox, spacer(), loginItemSettingsButton]), in: stack)
+        fill(loginItemStatus, in: stack)
 
         fill(row([symbol("menubar.rectangle", description: L("footer.menu_bar"), size: 14),
                   note(L("footer.background"))], spacing: 7), in: stack)

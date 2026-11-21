@@ -76,7 +76,7 @@ ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip
 
 **Disable Touch Mapping** disables mapping. Quitting the app also releases the interfaces and any mouse button it is holding. Closing its settings window leaves mapping running; reopening TouchHop brings the settings back.
 
-For login startup, add TouchHop in **System Settings → General → Login Items**. An enabled installation resumes after launch when the saved target display and the required permissions are available.
+TouchHop opens at login by default. Use **Launch at Login** in TouchHop settings to change this. If macOS requires approval, use **Open Login Items** to allow TouchHop. Touch mapping resumes after launch when the saved target display and the required permissions are available.
 
 TouchHop uses a new app identity relative to the earlier local prototype named 外屏触控定位. Its permissions and preferences are separate. Quit the prototype before enabling TouchHop; this repository does not replace or modify an existing installation.
 
@@ -90,7 +90,7 @@ In the **Screen-switch Shortcut** section:
 
 - Click the displayed key to record a single ordinary key, a left/right modifier key, or a combination. Release a standalone modifier to finish recording it; Escape cancels. Caps Lock and Escape are not assignable.
 - **Reset to Default** restores right Command; **Enabled** enables or disables this feature independently of touch mapping.
-- Right and left Command are distinct single keys. A modifier triggers only after a solo press/release. Using it with another key, a click, drag, or scroll cancels the screen switch, so ordinary Command combinations keep their normal behavior.
+- Right and left Command are distinct single keys. A standalone modifier triggers on release. Ordinary Command combinations such as Command+C and Command-click keep their normal behavior.
 - An ordinary single key is consumed as a shortcut while enabled; assigning a letter or Space replaces its unmodified typing behavior. Modified uses of that key remain available.
 - The shortcut and enabled state persist across restarts. On the first upgrade from 0.2, the former default `⌃⌥H` migrates to right Command. Other custom bindings are retained.
 
@@ -110,7 +110,9 @@ The **Touch Mapping** menu item is checked while touch mapping is running. Click
 
 If the pointer icon is missing, check **System Settings → Menu Bar → Allow in the Menu Bar**. In a menu bar manager such as Frost, keep TouchHop in the **Visible** section and move it next to icons you can already see. A crowded menu bar may clip an item even when it is allowed and marked visible. Opening the TouchHop app again also reopens settings without resetting the running session.
 
-The shortcut is available while other apps are in front and does not click or focus a window. Release a physical mouse drag before switching. If a touch drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
+While dragging a window by its title bar with a mouse or trackpad, keep holding the window and use the same shortcut. The pointer and window jump to the next display together, and you can keep dragging. The default right Command shortcut still triggers when you release the key. Finish other gestures, such as selecting text, dragging files, or resizing a window, before switching.
+
+If a touchscreen drag is active, TouchHop releases its own mouse button and ignores that held contact until liftoff, preventing the pointer from immediately jumping back to the touchscreen.
 
 Combinations use Carbon's registered-hotkey API. Single-key mode uses a session event tap for key codes, modifier state, and mouse gestures needed to detect a solo modifier tap. A separate passive mouse-only observer remembers the last point per display without changing or suppressing events. Both listeners run only while their shortcut feature is enabled and require mouse-control and Input Monitoring access. No key history, typed text, or pointer trajectory is stored. Recording listens locally in the settings window.
 
@@ -122,7 +124,7 @@ If the selected display is unavailable, touch is not redirected to the built-in 
 
 ## Validation
 
-`./scripts/test.sh` runs 87 deterministic checks for report decoding, liftoff, invalid/truncated report rejection, negative desktop coordinates, edge positions, rotations, shortcut validation/persistence/migration, side-specific modifier taps and chord cancellation, screen cycling, per-display position memory, layout/resolution changes, stale-event rejection, pointer-overlay geometry, and bundled localization completeness and format arguments. These checks do not open a HID device, install event taps, register a global shortcut, request permissions, or post input.
+`./scripts/test.sh` checks report decoding, coordinate conversion, shortcut behavior, window-drag detection and placement, screen cycling, per-display position memory, pointer-overlay geometry, and the bundled translations. These checks do not open a HID device, install event taps, register a global shortcut, request permissions, or post input.
 
 The GitHub Actions workflow builds the app, runs these checks, and uploads a development ZIP. CI does not test physical touch hardware, permissions, or actual login startup.
 

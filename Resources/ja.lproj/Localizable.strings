@@ -43,6 +43,8 @@
 "shortcut.reset_failed" = "初期設定のショートカットに戻せませんでした。";
 "shortcut.control_required" = "マウス操作を許可してください。";
 "shortcut.release_buttons" = "マウスのボタンを離してから画面を切り替えてください。";
+"shortcut.window_moved" = "ドラッグ中のウインドウを %@ に移動しました。";
+"shortcut.drag_hint" = "ウインドウのドラッグ中にショートカットを使うと、ポインタと一緒に次の画面へ移動できます。";
 "shortcut.move_failed" = "ポインタを移動できませんでした。マウス操作の権限を確認してください。";
 "shortcut.memory_ready" = "各画面で最後に離れた位置を記録しています。";
 "shortcut.memory_failed" = "位置の記録を開始できません。入力監視の権限を確認してください。";
@@ -92,3 +94,8 @@
 "shortcut.registration_error" = "この組み合わせは登録できないか、使用中です（%d）。別のキーを指定してください。";
 "shortcut.recorder_title" = "%@ · クリックして変更";
 "key.unknown" = "キー %u";
+
+"login_item.checkbox" = "ログイン時に起動";
+"login_item.settings" = "ログイン項目を開く";
+"login_item.approval" = "ログイン時に起動するには、システム設定で TouchHop を許可してください。";
+"login_item.failed" = "ログイン時の起動設定を変更できませんでした。%@";

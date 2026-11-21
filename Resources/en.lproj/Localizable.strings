@@ -43,6 +43,8 @@
 "shortcut.reset_failed" = "Could not restore the default shortcut.";
 "shortcut.control_required" = "Allow Mouse Control first.";
 "shortcut.release_buttons" = "Release the mouse buttons before switching displays.";
+"shortcut.window_moved" = "Dragged window moved to %@.";
+"shortcut.drag_hint" = "While dragging a window, use the shortcut to carry it to the next display.";
 "shortcut.move_failed" = "Could not move the pointer. Check Mouse Control permission.";
 "shortcut.memory_ready" = "Remembering the last position on each display.";
 "shortcut.memory_failed" = "Position memory is unavailable. Check Input Monitoring permission.";
@@ -92,3 +94,8 @@
 "shortcut.registration_error" = "Could not register this key combination, or it is in use (%d). Choose another.";
 "shortcut.recorder_title" = "%@ · Click to Change";
 "key.unknown" = "Key %u";
+
+"login_item.checkbox" = "Launch at Login";
+"login_item.settings" = "Open Login Items";
+"login_item.approval" = "Allow TouchHop in System Settings to start it at login.";
+"login_item.failed" = "Couldn’t update Launch at Login. %@";

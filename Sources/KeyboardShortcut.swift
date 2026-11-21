@@ -34,11 +34,20 @@ struct ModifierTapRecognizer {
     let keyCode: UInt32
     private(set) var held = false
     private var armed = false
+    private var leftButtonHeldOnPress = false
 
     init(keyCode: UInt32) { self.keyCode = keyCode }
 
     mutating func cancel() { armed = false }
-    mutating func flagsChanged(key: UInt32, flags: CGEventFlags) -> Bool {
+    mutating func mouseEvent(_ type: CGEventType) {
+        // Motion during a left drag that predates the key press is allowed.
+        // Releasing that mouse button abandons the pending drag shortcut.
+        if type == .leftMouseDragged && leftButtonHeldOnPress { return }
+        if type == .leftMouseUp && !leftButtonHeldOnPress { return }
+        cancel()
+    }
+
+    mutating func flagsChanged(key: UInt32, flags: CGEventFlags, leftButtonHeld: Bool = false) -> Bool {
         guard key == keyCode, let deviceMask = modifierDeviceMasks[keyCode] else { cancel(); return false }
         let down = flags.rawValue & deviceMask != 0
         if down {
@@ -46,6 +55,7 @@ struct ModifierTapRecognizer {
                 let soloDevice = flags.rawValue & allDeviceModifiers == deviceMask
                 let soloModifier = carbonModifiers(flags) == modifierFlag(keyCode)
                 armed = soloDevice && soloModifier
+                leftButtonHeldOnPress = leftButtonHeld
             }
             held = true
             return false
@@ -161,7 +171,7 @@ final class GlobalShortcut {
     private var singlePressed = false
     private let signature: OSType = 0x54484F50 // THOP
     var shortcut = KeyboardShortcut.defaultReturn
-    var onPress: (() -> Void)?
+    var onPress: ((_ duringLeftPress: Bool) -> Void)?
     var isRegistered: Bool { reference != nil || eventTap != nil }
 
     func register(_ candidate: KeyboardShortcut) throws {
@@ -206,7 +216,7 @@ final class GlobalShortcut {
         guard AXIsProcessTrusted(), IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else {
             throw ShortcutError.inputAccess
         }
-        let types: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .rightMouseDown,
+        let types: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .leftMouseUp, .rightMouseDown,
                                    .otherMouseDown, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1) << $1.rawValue }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -236,8 +246,11 @@ final class GlobalShortcut {
         let key = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         if shortcut.isModifier {
             if type == .flagsChanged {
-                if modifierTap.flagsChanged(key: key, flags: event.flags) { scheduleAction() }
-            } else { modifierTap.cancel() }
+                let leftDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
+                if modifierTap.flagsChanged(key: key, flags: event.flags, leftButtonHeld: leftDown) {
+                    scheduleAction(duringLeftPress: leftDown)
+                }
+            } else { modifierTap.mouseEvent(type) }
             // Preserve Command/Shift/etc. for normal combinations, clicks, and system behavior.
             return Unmanaged.passUnretained(event)
         }
@@ -246,7 +259,7 @@ final class GlobalShortcut {
             if carbonModifiers(event.flags) == 0 && !event.flags.contains(.maskSecondaryFn) &&
                event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
                 singlePressed = true
-                scheduleAction()
+                scheduleAction(duringLeftPress: CGEventSource.buttonState(.combinedSessionState, button: .left))
                 return nil
             }
         }
@@ -257,11 +270,11 @@ final class GlobalShortcut {
         return Unmanaged.passUnretained(event)
     }
 
-    private func scheduleAction() {
+    private func scheduleAction(duringLeftPress: Bool) {
         let generation = sequence
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRegistered, self.sequence == generation else { return }
-            self.onPress?()
+            self.onPress?(duringLeftPress)
         }
     }
 
@@ -282,7 +295,10 @@ final class GlobalShortcut {
             return OSStatus(eventNotHandledErr)
         }
         if GetEventKind(event) == UInt32(kEventHotKeyReleased) { pressed = false }
-        else if !pressed { pressed = true; onPress?() }
+        else if !pressed {
+            pressed = true
+            onPress?(CGEventSource.buttonState(.combinedSessionState, button: .left))
+        }
         return noErr
     }
 

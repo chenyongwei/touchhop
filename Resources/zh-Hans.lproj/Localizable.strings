@@ -43,6 +43,8 @@
 "shortcut.reset_failed" = "无法恢复默认快捷键";
 "shortcut.control_required" = "请先允许鼠标控制权限";
 "shortcut.release_buttons" = "请先松开鼠标按键，再切换屏幕";
+"shortcut.window_moved" = "已将拖动中的窗口移到 %@";
+"shortcut.drag_hint" = "拖动窗口时使用此快捷键，可将窗口和光标一起移到下一块屏幕。";
 "shortcut.move_failed" = "无法移动鼠标，请检查鼠标控制权限";
 "shortcut.memory_ready" = "已开始记忆各屏幕离开位置";
 "shortcut.memory_failed" = "位置记忆尚未启用，请检查输入监控权限";
@@ -92,3 +94,8 @@
 "shortcut.registration_error" = "此组合键无法注册或已被占用（%d），请换一个";
 "shortcut.recorder_title" = "%@ · 点击更改";
 "key.unknown" = "按键 %u";
+
+"login_item.checkbox" = "登录时启动";
+"login_item.settings" = "打开登录项设置";
+"login_item.approval" = "请在系统设置中允许 TouchHop 登录时启动。";
+"login_item.failed" = "无法更新登录时启动设置。%@";

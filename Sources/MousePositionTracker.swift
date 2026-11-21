@@ -15,6 +15,7 @@ final class MousePositionTracker {
     private var source: CFRunLoopSource?
     private var screens: [ScreenDestination] = []
     private var geometryTimestamp: CGEventTimestamp = 0
+    let windowDrag = WindowDrag()
     var onPosition: ((CGPoint, CGEventTimestamp, [ScreenDestination]) -> Void)?
     var isRunning: Bool { tap != nil }
 
@@ -52,10 +53,13 @@ final class MousePositionTracker {
 
     private func receive(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            windowDrag.reset()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
-        guard tap != nil, event.timestamp >= geometryTimestamp else { return }
+        guard tap != nil else { return }
+        windowDrag.observe(type, event: event)
+        guard event.timestamp >= geometryTimestamp else { return }
         onPosition?(event.location, event.timestamp, screens)
     }
 
@@ -65,6 +69,7 @@ final class MousePositionTracker {
         if let tap { CFMachPortInvalidate(tap) }
         source = nil
         tap = nil
+        windowDrag.reset()
     }
     deinit { stop() }
 }

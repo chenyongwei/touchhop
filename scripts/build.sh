@@ -26,7 +26,7 @@ xcrun swiftc -O -parse-as-library -target "$TOUCHHOP_ARCH-apple-macos14.0" \
   "$TOUCHHOP_ROOT"/Sources/*.swift \
   -o "$TOUCHHOP_APP/Contents/MacOS/TouchHop" \
   -framework AppKit -framework IOKit -framework CoreGraphics \
-  -framework ColorSync -framework ApplicationServices -framework Carbon
+  -framework ColorSync -framework ApplicationServices -framework Carbon -framework ServiceManagement
 cp "$TOUCHHOP_ROOT/Resources/Info.plist" "$TOUCHHOP_APP/Contents/Info.plist"
 cp "$TOUCHHOP_ROOT/Resources/TouchHop.icns" "$TOUCHHOP_APP/Contents/Resources/"
 for TOUCHHOP_LOCALIZATION in "$TOUCHHOP_ROOT"/Resources/*.lproj; do
