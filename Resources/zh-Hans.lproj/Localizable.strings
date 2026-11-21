@@ -71,6 +71,8 @@
 "footer.background" = "关闭窗口后继续在菜单栏运行。";
 "display.external" = "外接显示器";
 "display.saved_disconnected" = "先前绑定的外屏未连接";
+"display.automatic_target" = "自动 · %@";
+"display.automatic_wait" = "自动 · 等待识别到唯一支持的触屏";
 "display.none" = "未检测到外接显示器";
 "summary.permission" = "● 待授权";
 "summary.running" = "● 运行中";

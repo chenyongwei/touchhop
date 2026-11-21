@@ -71,6 +71,8 @@
 "footer.background" = "ウインドウを閉じてもメニューバーで動作を続けます。";
 "display.external" = "外部ディスプレイ";
 "display.saved_disconnected" = "保存した外部ディスプレイが未接続です";
+"display.automatic_target" = "自動 · %@";
+"display.automatic_wait" = "自動 · 対応するディスプレイを 1 台特定できるまで待機";
 "display.none" = "外部ディスプレイが見つかりません";
 "summary.permission" = "● 権限が必要";
 "summary.running" = "● 動作中";

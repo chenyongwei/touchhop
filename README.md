@@ -68,7 +68,7 @@ ditto -c -k --keepParent build/TouchHop.app build/TouchHop-macos.zip
 
 1. Quit any other touch-mapping app using the same panel.
 2. Copy `build/TouchHop.app` to Applications, then open it.
-3. Select the target external display.
+3. Use **Automatic** to recognize the tested LIK display (vendor 0x312B, model 0x3360) on launch and reconnection. Mapping waits if no matching display or multiple matches are present. You can select a display manually. Upgrades retain an existing manual binding until you choose Automatic.
 4. In **Permissions & Status**, use **Allow Control** to grant Accessibility / mouse-control access. macOS may label this panel **Device Control and Data Access**. Complete any system authentication yourself.
 5. Use **Allow Monitoring** to request Input Monitoring. If macOS asks you to restart the app, do so.
 6. Mapping enables by default once the required permissions and selected display are available. If you previously disabled it, click **Enable Touch Mapping**. Place the cursor on the built-in display, then touch an empty area on the external screen to check alignment.

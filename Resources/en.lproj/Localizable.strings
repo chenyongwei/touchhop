@@ -71,6 +71,8 @@
 "footer.background" = "Closing this window keeps TouchHop running in the menu bar.";
 "display.external" = "External Display";
 "display.saved_disconnected" = "The saved external display is disconnected";
+"display.automatic_target" = "Automatic · %@";
+"display.automatic_wait" = "Automatic · Waiting for a unique supported display";
 "display.none" = "No external display detected";
 "summary.permission" = "● Permissions Needed";
 "summary.running" = "● Running";

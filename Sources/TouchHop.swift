@@ -59,6 +59,18 @@ func externalDisplays() -> [CGDirectDisplayID] {
     return ids.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) == 0 }
 }
 
+// Display-side IDs read from the tested panel. Its USB controller uses different IDs.
+struct ExternalPanel {
+    let uuid: String
+    let vendor: UInt32
+    let model: UInt32
+
+    static func automaticTarget(in displays: [ExternalPanel]) -> String? {
+        let matches = displays.filter { $0.vendor == 0x312B && $0.model == 0x3360 }
+        return matches.count == 1 ? matches[0].uuid : nil
+    }
+}
+
 func displayName(_ id: CGDirectDisplayID) -> String {
     NSScreen.screens.first {
         ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id
@@ -282,7 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusLabel: NSTextField!
     var dataLabel: NSTextField!
     var toggleButton: NSButton!
-    var displayIDs: [CGDirectDisplayID] = []
+    var selectedUUID: String?
     var timer: Timer?
     var autoStartPending = false
     let returnShortcut = GlobalShortcut()
@@ -464,33 +476,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func refreshDisplays() {
         mousePositionTracker.updateScreens(activeCycleScreens(), since: mousePositionTimestamp())
         let saved = UserDefaults.standard.string(forKey: "displayUUID")
-        displayIDs = externalDisplays()
+        let displays = externalDisplays().compactMap { id -> (panel: ExternalPanel, title: String)? in
+            guard let uuid = uuidForDisplay(id) else { return nil }
+            let bounds = CGDisplayBounds(id)
+            let panel = ExternalPanel(uuid: uuid, vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id))
+            return (panel, "\(displayName(id)) · \(Int(bounds.width)) × \(Int(bounds.height))")
+        }
+        let automatic = ExternalPanel.automaticTarget(in: displays.map { $0.panel })
+        let detected = displays.first { $0.panel.uuid == automatic }
         displayPicker.removeAllItems()
-        for id in displayIDs {
-            let b = CGDisplayBounds(id)
-            displayPicker.addItem(withTitle: "\(displayName(id)) · \(Int(b.width)) × \(Int(b.height))")
+        displayPicker.addItem(withTitle: detected.map { L("display.automatic_target", $0.title) } ?? L("display.automatic_wait"))
+        for display in displays {
+            let item = NSMenuItem(title: display.title, action: nil, keyEquivalent: "")
+            item.representedObject = display.panel.uuid
+            displayPicker.menu?.addItem(item)
         }
-        if let index = displayIDs.firstIndex(where: { uuidForDisplay($0) == saved }) {
-            displayPicker.selectItem(at: index)
-        } else if saved != nil {
-            displayPicker.addItem(withTitle: L("display.saved_disconnected"))
-            displayPicker.selectItem(at: displayIDs.count)
+        if let saved {
+            if let index = displays.firstIndex(where: { $0.panel.uuid == saved }) {
+                displayPicker.selectItem(at: index + 1)
+                selectedUUID = saved
+            } else {
+                displayPicker.addItem(withTitle: L("display.saved_disconnected"))
+                displayPicker.lastItem?.isEnabled = false
+                displayPicker.selectItem(at: displayPicker.numberOfItems - 1)
+                selectedUUID = nil
+            }
+        } else {
+            displayPicker.selectItem(at: 0)
+            selectedUUID = automatic
         }
-        if displayIDs.isEmpty { displayPicker.addItem(withTitle: L("display.none")) }
     }
     @objc func displaysChanged() {
-        mapper.releasePointer()
+        mapper.suspendTouchForCursorReturn()
         mousePositionTracker.windowDrag.reset()
         refreshDisplays()
+        if mapper.running && mapper.targetUUID != selectedUUID { mapper.stop() }
+        autoStartPending = !mapper.running && UserDefaults.standard.bool(forKey: "enabled")
         refreshStatus()
     }
-    var selectedUUID: String? {
-        let index = displayPicker.indexOfSelectedItem
-        return displayIDs.indices.contains(index) ? uuidForDisplay(displayIDs[index]) : nil
-    }
     @objc func changeDisplay() {
-        if let uuid = selectedUUID { UserDefaults.standard.set(uuid, forKey: "displayUUID") }
-        if mapper.running { enable() }
+        UserDefaults.standard.set(displayPicker.selectedItem?.representedObject as? String, forKey: "displayUUID")
+        displaysChanged()
     }
     @objc func changeRotation() {
         UserDefaults.standard.set(rotationPicker.indexOfSelectedItem * 90, forKey: "rotation")
@@ -506,10 +532,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
     }
     @objc func toggle() {
-        autoStartPending = false
-        if mapper.running {
+        if mapper.running || autoStartPending {
+            autoStartPending = false
             mapper.stop()
             UserDefaults.standard.set(false, forKey: "enabled")
+        } else if selectedUUID == nil {
+            UserDefaults.standard.set(true, forKey: "enabled")
+            autoStartPending = true
         } else { enable() }
         refreshStatus()
     }
@@ -517,7 +546,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let uuid = selectedUUID else { mapper.message = L("touch.select_display"); return }
         mapper.start(uuid: uuid, rotation: rotationPicker.indexOfSelectedItem * 90)
         if mapper.running {
-            UserDefaults.standard.set(uuid, forKey: "displayUUID")
             UserDefaults.standard.set(true, forKey: "enabled")
         }
     }
@@ -548,8 +576,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             autoStartPending = false
             enable()
         }
-        toggleButton.title = mapper.running ? L("touch.disable") : L("touch.enable")
-        statusLabel.stringValue = mapper.message
+        toggleButton.title = mapper.running || autoStartPending ? L("touch.disable") : L("touch.enable")
+        statusLabel.stringValue = autoStartPending && selectedUUID == nil ? (displayPicker.titleOfSelectedItem ?? mapper.message) : mapper.message
         let needsPermission = !control || !monitoring
         summaryLabel.stringValue = needsPermission ? L("summary.permission") : (mapper.running ? L("summary.running") : L("summary.paused"))
         summaryLabel.textColor = needsPermission ? .systemOrange : (mapper.running ? .systemGreen : .secondaryLabelColor)
@@ -570,6 +598,13 @@ func selfTest() {
         guard condition else { fputs("FAIL: \(label)\n", stderr); exit(1) }
         checks += 1
     }
+    let monitor = ExternalPanel(uuid: "ordinary", vendor: 0x30AE, model: 0x66C9)
+    let touch = ExternalPanel(uuid: "touch", vendor: 0x312B, model: 0x3360)
+    let reconnected = ExternalPanel(uuid: "new-port", vendor: touch.vendor, model: touch.model)
+    require(ExternalPanel.automaticTarget(in: [monitor, touch]) == touch.uuid, "touch panel on secondary display")
+    require(ExternalPanel.automaticTarget(in: [monitor]) == nil, "wait after unplugging touch display")
+    require(ExternalPanel.automaticTarget(in: [reconnected, monitor]) == reconnected.uuid, "reconnect on another port")
+    require(ExternalPanel.automaticTarget(in: [touch, reconnected]) == nil, "ambiguous panel models require selection")
     let maxX = 16383, maxY = 9599
     let down: [UInt8] = [7, 1, 0xFF, 0x3F, 0x7F, 0x25, 0]
     let p = decodeMouseReport(down, reportID: 7, maxX: maxX, maxY: maxY)!
