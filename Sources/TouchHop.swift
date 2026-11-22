@@ -19,6 +19,7 @@ struct TouchPacket {
     let down: Bool
     let x: Int
     let y: Int
+    let wheel: Int32
 }
 
 func decodeMouseReport(_ bytes: [UInt8], reportID: UInt32, maxX: Int, maxY: Int) -> TouchPacket? {
@@ -30,7 +31,8 @@ func decodeMouseReport(_ bytes: [UInt8], reportID: UInt32, maxX: Int, maxY: Int)
     let x = Int(bytes[offset + 1]) | Int(bytes[offset + 2]) << 8
     let y = Int(bytes[offset + 3]) | Int(bytes[offset + 4]) << 8
     guard maxX > 0, maxY > 0, x <= maxX, y <= maxY else { return nil }
-    return TouchPacket(down: bytes[offset] & 1 != 0, x: x, y: y)
+    let wheel = Int32(Int8(bitPattern: bytes[offset + 5]))
+    return TouchPacket(down: bytes[offset] & 1 != 0, x: x, y: y, wheel: wheel)
 }
 
 func mappedPoint(_ p: TouchPacket, maxX: Int, maxY: Int, bounds: CGRect, rotation: Int) -> CGPoint {
@@ -106,6 +108,29 @@ final class PanelSession {
     deinit { buffer.deinitialize(count: 64); buffer.deallocate() }
 }
 
+struct PanelEvent {
+    let type: CGEventType
+    let point: CGPoint
+    var clickCount: Int64 = 0
+    var verticalPixels: Int32 = 0
+
+    func post(source: CGEventSource?) -> Bool {
+        let event: CGEvent?
+        if type == .scrollWheel {
+            event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 1,
+                            wheel1: verticalPixels, wheel2: 0, wheel3: 0)
+            event?.location = point
+        } else {
+            event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+            event?.setIntegerValueField(.mouseEventClickState, value: clickCount)
+        }
+        guard let event else { return false }
+        event.timestamp = mousePositionTimestamp()
+        event.post(tap: .cghidEventTap)
+        return true
+    }
+}
+
 final class TouchMapper {
     var manager: IOHIDManager?
     var sessions: [Int: PanelSession] = [:]
@@ -117,6 +142,22 @@ final class TouchMapper {
     var invalidReports = 0
     var message = L("touch.inactive")
     var lastReport = L("details.no_reports")
+    private struct Scroll {
+        let location: Int
+        let anchor: CGPoint
+        var lastWheel: TimeInterval
+        var held: Bool
+        var released = false
+        var muted = false
+    }
+    private var scroll: Scroll?
+    private var pressTimer: Timer?
+    private var pressTime: TimeInterval = 0
+    var doubleClickInterval: () -> TimeInterval = { NSEvent.doubleClickInterval }
+    let sendEvent: (PanelEvent, CGEventSource?) -> Bool
+    init(sendEvent: @escaping (PanelEvent, CGEventSource?) -> Bool = { $0.post(source: $1) }) {
+        self.sendEvent = sendEvent
+    }
     var activeLocation: Int?
     var isDown = false
     var lastPoint = CGPoint.zero
@@ -166,6 +207,7 @@ final class TouchMapper {
             guard let ctx else { return }
             let mapper = Unmanaged<TouchMapper>.fromOpaque(ctx).takeUnretainedValue()
             let location = (IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber)?.intValue ?? 0
+            if mapper.scroll?.location == location { mapper.scroll = nil }
             if mapper.activeLocation == location { mapper.releasePointer() }
             if mapper.suppressedLocation == location { mapper.suppressedLocation = nil }
             mapper.sessions.removeValue(forKey: location)
@@ -203,65 +245,134 @@ final class TouchMapper {
         guard let packet = decodeMouseReport(bytes, reportID: reportID, maxX: session.maxX, maxY: session.maxY) else {
             invalidReports += 1; return
         }
-        if let suppressedLocation {
-            if session.location == suppressedLocation && !packet.down { self.suppressedLocation = nil }
-            return
-        }
         guard let bounds = targetBounds() else {
-            releasePointer()
-            suppressedLocation = packet.down ? session.location : nil
+            suspendTouchForCursorReturn()
+            if packet.down { suppressedLocation = session.location }
+            else if session.location == suppressedLocation && packet.wheel == 0 { suppressedLocation = nil }
+            if packet.wheel == 0 && !packet.down && scroll?.location == session.location { scroll = nil }
             message = L("touch.paused_disconnected")
             return
         }
-        if isDown && bounds != activeBounds {
-            releasePointer()
-            suppressedLocation = packet.down ? session.location : nil
-            return
-        }
-        // The display exposes two USB controller locations. One contact owns the
-        // pointer until release, so simultaneous reports cannot create duplicate clicks.
-        if let activeLocation, activeLocation != session.location { return }
         let point = mappedPoint(packet, maxX: session.maxX, maxY: session.maxY,
                                 bounds: bounds, rotation: rotation)
-        if packet.down {
-            if !isDown {
-                onTouchStart?()
-                activeLocation = session.location
-                activeBounds = bounds
-                let now = ProcessInfo.processInfo.systemUptime
-                let close = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) < 6
-                clickCount = now - lastClickTime < NSEvent.doubleClickInterval && close ? min(3, clickCount + 1) : 1
-                lastClickTime = now
-                lastClickPoint = point
-                post(.mouseMoved, at: point)
-                post(.leftMouseDown, at: point)
-                isDown = true
-            } else if point != lastPoint {
-                post(.leftMouseDragged, at: point)
+        handle(packet, at: point, location: session.location, bounds: bounds, now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    func handle(_ packet: TouchPacket, at point: CGPoint, location: Int, bounds: CGRect, now: TimeInterval) {
+        if let suppressedLocation {
+            if location == suppressedLocation {
+                if packet.wheel != 0 {
+                    // The firmware can switch from an absolute press to buttonless wheel reports.
+                    scroll = Scroll(location: location, anchor: point, lastWheel: now, held: packet.down, muted: true)
+                    self.suppressedLocation = nil
+                } else if !packet.down { self.suppressedLocation = nil }
             }
-            lastPoint = point
-        } else if isDown {
+            return
+        }
+        if (activeLocation != nil || scroll != nil) && bounds != activeBounds {
+            suspendTouchForCursorReturn()
+            activeBounds = bounds
+            return
+        }
+
+        // Wheel-only reports have no gesture-end bit. Keep one USB owner for a burst,
+        // accepting a handoff after silence. A real button release also ends the held tail.
+        if let burst = scroll, !burst.held && now - burst.lastWheel >= 0.15 { scroll = nil }
+        if packet.wheel != 0 {
+            if let burst = scroll, burst.location != location { return }
+            if scroll == nil {
+                let anchor: CGPoint
+                if activeLocation != nil { anchor = lastPoint }
+                else if packet.x == 0 && packet.y == 0 && !packet.down {
+                    let cursor = CGEvent(source: nil)?.location
+                    anchor = cursor.flatMap { bounds.contains($0) ? $0 : nil } ?? CGPoint(x: bounds.midX, y: bounds.midY)
+                } else { anchor = point }
+                onTouchStart?()
+                releasePointer()
+                lastClickTime = -.infinity
+                activeBounds = bounds
+                scroll = Scroll(location: location, anchor: anchor, lastWheel: now, held: packet.down)
+                post(.mouseMoved, at: anchor)
+            }
+            scroll?.lastWheel = now
+            scroll?.held = packet.down
+            scroll?.released = false
+            if let burst = scroll, !burst.muted { postWheel(packet.wheel, at: burst.anchor) }
+            return
+        }
+        if let burst = scroll {
+            guard burst.location == location else { return }
+            if packet.down && burst.released {
+                scroll = nil
+            } else {
+                scroll?.held = packet.down
+                scroll?.released = !packet.down
+                return
+            }
+        }
+        if let activeLocation, activeLocation != location { return }
+        if packet.down {
+            if activeLocation == nil {
+                onTouchStart?()
+                activeLocation = location
+                activeBounds = bounds
+                lastPoint = point
+                pressTime = now
+                post(.mouseMoved, at: point)
+                // Allow the first finger of a two-finger gesture to land without clicking.
+                // A tap commits on release, a drag on movement, and a hold on this timer.
+                let timer = Timer(timeInterval: 0.15, repeats: false) { [weak self] _ in self?.commitPress() }
+                pressTimer = timer
+                RunLoop.main.add(timer, forMode: .common)
+            } else if point != lastPoint {
+                if !isDown && hypot(point.x - lastPoint.x, point.y - lastPoint.y) < 3 { return }
+                commitPress()
+                post(.leftMouseDragged, at: point)
+                lastPoint = point
+            }
+        } else if activeLocation != nil {
+            commitPress()
             lastPoint = point
             releasePointer()
         }
+    }
+
+    private func commitPress() {
+        guard activeLocation != nil, !isDown else { return }
+        pressTimer?.invalidate()
+        pressTimer = nil
+        let close = hypot(lastPoint.x - lastClickPoint.x, lastPoint.y - lastClickPoint.y) < 6
+        clickCount = pressTime - lastClickTime < doubleClickInterval() && close ? min(3, clickCount + 1) : 1
+        lastClickTime = pressTime
+        lastClickPoint = lastPoint
+        post(.leftMouseDown, at: lastPoint)
+        isDown = true
+    }
+
+    private func postWheel(_ delta: Int32, at point: CGPoint) {
+        // The panel reports positive for a finger moving up. Negative Quartz deltas
+        // reveal content farther down the page, so the content follows the fingers.
+        deliver(PanelEvent(type: .scrollWheel, point: point, verticalPixels: -8 * delta))
     }
 
     func post(_ type: CGEventType, at point: CGPoint) {
-        guard let event = CGEvent(mouseEventSource: eventSource, mouseType: type,
-                                  mouseCursorPosition: point, mouseButton: .left) else { return }
-        event.setIntegerValueField(.mouseEventClickState, value: clickCount)
-        event.timestamp = mousePositionTimestamp()
-        event.post(tap: .cghidEventTap)
-        events += 1
+        deliver(PanelEvent(type: type, point: point, clickCount: clickCount))
+    }
+
+    private func deliver(_ event: PanelEvent) {
+        if sendEvent(event, eventSource) { events += 1 }
     }
 
     func releasePointer() {
+        pressTimer?.invalidate()
+        pressTimer = nil
         if isDown { post(.leftMouseUp, at: lastPoint) }
         isDown = false
         activeLocation = nil
     }
 
     func suspendTouchForCursorReturn() {
+        scroll?.muted = true
         let location = activeLocation
         releasePointer()
         if let location { suppressedLocation = location }
@@ -269,6 +380,7 @@ final class TouchMapper {
 
     func stop() {
         running = false
+        scroll = nil
         releasePointer()
         if let m = manager {
             IOHIDManagerUnscheduleFromRunLoop(m, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
@@ -632,13 +744,14 @@ func selfTest() {
     let b = CGRect(x: -2048, y: -1080, width: 2048, height: 2730)
     let q = mappedPoint(p, maxX:maxX,maxY:maxY,bounds:b,rotation:0)
     require(q == CGPoint(x: -1, y: 1649), "negative desktop origin and bottom/right edge")
-    let origin = TouchPacket(down: true, x: 0, y: 0)
+    let origin = TouchPacket(down: true, x: 0, y: 0, wheel: 0)
     require(mappedPoint(origin,maxX:maxX,maxY:maxY,bounds:b,rotation:0) == b.origin, "top/left edge")
     require(mappedPoint(origin,maxX:maxX,maxY:maxY,bounds:b,rotation:90) == CGPoint(x:-1,y:-1080), "90 degree transform")
     require(mappedPoint(origin,maxX:maxX,maxY:maxY,bounds:b,rotation:180) == CGPoint(x:-1,y:1649), "180 degree transform")
     require(mappedPoint(origin,maxX:maxX,maxY:maxY,bounds:b,rotation:270) == CGPoint(x:-2048,y:1649), "270 degree transform")
     let up = decodeMouseReport([7,0,0,0,0,0,0],reportID:7,maxX:maxX,maxY:maxY)!
     require(!up.down, "liftoff decoded")
+    checkPanelScroll(require)
     let hotkey = KeyboardShortcut.defaultReturn
     require(KeyboardShortcut(keyCode: 54, modifiers: 0) == hotkey, "right Command default")
     require(KeyboardShortcut(keyCode: 4, modifiers: 0) != nil, "single ordinary key allowed")

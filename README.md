@@ -27,6 +27,7 @@ The app reads the device's declared coordinate limits instead of assuming the te
 
 - Direct touch-to-cursor positioning across displays.
 - Single-finger press/release and dragging, with mouse click-count handling for double-clicks.
+- Two-finger vertical scrolling on the bound display using the panel’s firmware wheel signal.
 - Optional 90°, 180°, and 270° coordinate rotation.
 - Configurable single-key or combination shortcuts, defaulting to the right Command key.
 - Repeated presses cycle between screens, restoring the last position on each screen with a temporary enlarged pointer locator.
@@ -35,7 +36,7 @@ The app reads the device's declared coordinate limits instead of assuming the te
 - A visible settings window with permission status, interface count, and input activity.
 - No network requests, telemetry, kernel extension, or administrator service.
 
-Double-click and dragging are implemented but have not had separate hardware acceptance tests. Multitouch gestures, scrolling, pen input, and arbitrary HID report layouts are not implemented.
+Double-click and dragging are implemented but have not had separate hardware acceptance tests. Physical captures confirmed opposite wheel values on two-finger up and down drags. Browser feel still needs on-device acceptance. Pinch, horizontal scrolling and pen input are outside the supported report profile.
 
 ## Build
 

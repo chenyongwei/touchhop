@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Forward the tested panel’s two-finger vertical wheel reports as pixel scrolling on the bound display. Content follows the drag.
+- Keep one USB source per scroll burst and distinguish the start of a scroll from a single-finger tap, drag or hold.
+
 ## 0.6.0
 
 - Add English and Japanese alongside Simplified Chinese throughout settings, menu bar actions, permission guidance, shortcut labels, status messages, and pointer-overlay accessibility text.
